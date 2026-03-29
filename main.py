@@ -4,7 +4,7 @@ from online_monitor import OnlineMonitor
 
 
 def main() -> None:
-    monitor = OnlineMonitor(output_dir="output_signal", show_every=5)
+    monitor = OnlineMonitor(output_dir="output_signal", show_every=1)
     try:
         step = 0
         while True:
