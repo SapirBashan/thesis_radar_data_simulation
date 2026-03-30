@@ -24,7 +24,7 @@ class OnlineMonitor:
 
         plt.ion()
         self.fig, self.axes = plt.subplots(2, 2, figsize=(12, 8))
-        self.fig.suptitle("Online Signal Processing Monitor", fontsize=10)
+        self.fig.suptitle("Online Signal Processing Monitor", fontsize=10, y=0.985)
 
         # Extra spacing helps reduce clutter with titles/labels/colorbars.
         self.fig.subplots_adjust(
@@ -55,6 +55,16 @@ class OnlineMonitor:
         self._sc22 = None
 
         self._last_error = None
+        self._last_meta_error = None
+
+        self._meta_text = self.fig.text(
+            0.5,
+            0.952,
+            "submode: N/A | data: N/A MB | current: N/A GB/s | time: N/A ms | running: N/A GB/s",
+            ha="center",
+            va="center",
+            fontsize=8,
+        )
 
     @staticmethod
     def __safe_remove_colorbar(cb):
@@ -85,6 +95,7 @@ class OnlineMonitor:
         dpc_path = self.output_dir / "dpc_avg.txt"
         fft_path = self.output_dir / "fft_signal.txt"
         cfar_path = self.output_dir / "cfar_mask.txt"
+        submode_path = self.output_dir / "submode_stat.txt"
 
         try:
             raw_signal = self.__read_complex_2d(raw_path)  # shape: (npri, nrg)
@@ -101,10 +112,21 @@ class OnlineMonitor:
 
         self._last_error = None
 
+        submode_stat = None
+        try:
+            submode_stat = self.__read_submode_stat(submode_path)
+            self._last_meta_error = None
+        except (FileNotFoundError, ValueError) as exc:
+            msg = f"[OnlineMonitor] submode stats unavailable: {exc}"
+            if msg != self._last_meta_error:
+                print(msg)
+                self._last_meta_error = msg
+
         self.__plot_11(raw_signal)
         self.__plot_12(dpc_avg)
         self.__plot_21(fft_signal)
         self.__plot_22(raw_signal, cfar_mask)
+        self.__update_submode_text(submode_stat)
 
         # Reduce tick-label font size across all subplots.
         for ax in (self.ax11, self.ax12, self.ax21, self.ax22):
@@ -172,6 +194,45 @@ class OnlineMonitor:
             raise ValueError(f"{path}: expected {n} values, got {idx}")
 
         return vals
+
+    @staticmethod
+    def __read_submode_stat(path: Path) -> dict[str, float | str | int]:
+        with path.open("r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f if line.strip()]
+
+        if len(lines) < 5:
+            raise ValueError(f"{path}: expected at least 5 non-empty lines")
+
+        submode_name = lines[0]
+        amount_bytes = int(lines[1])
+        throughput_gbps = float(lines[2])
+        elapsed_ms = float(lines[3])
+        running_avg_gbps = float(lines[4])
+
+        return {
+            "submode_name": submode_name,
+            "amount_bytes": amount_bytes,
+            "throughput_gbps": throughput_gbps,
+            "elapsed_ms": elapsed_ms,
+            "running_avg_gbps": running_avg_gbps,
+        }
+
+    def __update_submode_text(self, stat: dict[str, float | str | int] | None) -> None:
+        if not stat:
+            self._meta_text.set_text(
+                "submode: N/A | data: N/A MB | current: N/A GB/s | time: N/A ms | running: N/A GB/s"
+            )
+            return
+
+        amount_mb = float(stat["amount_bytes"]) / 1e6
+        self._meta_text.set_text(
+            "submode: "
+            f"{stat['submode_name']} | "
+            f"data: {amount_mb:.3f} MB | "
+            f"current: {float(stat['throughput_gbps']):.3f} GB/s | "
+            f"time: {float(stat['elapsed_ms']):.3f} ms | "
+            f"running: {float(stat['running_avg_gbps']):.3f} GB/s"
+        )
 
     def __plot_11(self, raw_signal: np.ndarray) -> None:
         # Raw signal heatmap: fast-time/range-gate vs slow-time/PRI
