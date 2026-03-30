@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import time
 
 import numpy as np
 
@@ -100,12 +101,6 @@ def compute_cfar_mask(dpc_avg: np.ndarray, params: CFARParams) -> np.ndarray:
 
 
 def write_complex_2d_txt(path: Path, data: np.ndarray) -> None:
-    """
-    Writes complex matrix in monitor format:
-      first line: "nrg npri"
-      then nrg*npri lines: "re im"
-    data is expected shape (npri, nrg).
-    """
     path.parent.mkdir(parents=True, exist_ok=True)
     npri, nrg = data.shape
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -116,7 +111,17 @@ def write_complex_2d_txt(path: Path, data: np.ndarray) -> None:
         for v in flat:
             f.write(f"{float(np.real(v)):.9e} {float(np.imag(v)):.9e}\n")
 
-    tmp.replace(path)
+    # Retry logic with backoff
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            if attempt < max_retries - 1:
+                time.sleep(0.01 * (2 ** attempt))  # exponential backoff
+            else:
+                raise
 
 
 def write_float_1d_txt(path: Path, data: np.ndarray) -> None:
