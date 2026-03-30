@@ -10,7 +10,7 @@ def main() -> None:
         while True:
             monitor.update(step)
             step += 1
-            time.sleep(1.0)
+            time.sleep(1.25)
     except KeyboardInterrupt:
         pass
     finally:
