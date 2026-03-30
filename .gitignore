@@ -1,7 +1,7 @@
 .venv/
 .idea/
 
-pyproject.toml
+#pyproject.toml
 
 output_signal/
 
