@@ -15,9 +15,9 @@ from generate_signal import (
 
 MODES: list[tuple[int, int]] = [
     (1024, 64),
-    (256, 256),
+    (256, 512),
     (64, 8),
-    (512, 512)
+    (256, 512)
 ]
 
 
