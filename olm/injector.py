@@ -15,8 +15,9 @@ from generate_signal import (
 
 MODES: list[tuple[int, int]] = [
     (1024, 64),
-    (256, 256),
+    (256, 512),
     (64, 8),
+    (256, 512)
 ]
 
 
@@ -64,7 +65,7 @@ def run_injector(
     throughput_sum_gbps = 0.0
 
     while True:
-        if max_steps > 0 and step >= max_steps:
+        if 0 < max_steps <= step:
             break
 
         mode_idx = (step // max(1, mode_hold)) % len(MODES)
@@ -116,10 +117,10 @@ def run_injector(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate and inject random radar snapshots.")
     parser.add_argument("--output-dir", default="output_signal", help="Directory for txt snapshot files.")
-    parser.add_argument("--interval-sec", type=float, default=1, help="Write period in seconds.")
+    parser.add_argument("--interval-sec", type=float, default=2.5, help="Write period in seconds.")
     parser.add_argument("--mode-hold", type=int, default=1, help="Writes per mode before switching.")
     parser.add_argument("--max-steps", type=int, default=0, help="0 means infinite loop.")
-    parser.add_argument("--seed", type=int, default=None, help="Optional deterministic seed.")
+    parser.add_argument("--seed", type=int, default=42, help="Optional deterministic seed.")
     return parser.parse_args()
 
 
