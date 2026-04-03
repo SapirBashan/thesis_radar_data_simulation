@@ -13,6 +13,8 @@ from config.target import Target
 
 from radar_signal.generator import RadarSimulator
 
+from psp import psp_process, CFARParams, filter_target_submode
+
 C = 299792458.0
 
 
@@ -195,10 +197,12 @@ def main():
 
     wide_sm = submodes.submodes["wide_search"]
 
-    max_r_all = max(
+    r_all = list(
         sm.num_range_gates * C / (2 * sm.fs)
         for sm in submodes.submodes.values()
     )
+    max_r_all = max(r_all)
+    min_r_all = min(r_all)
 
     steps = build_scan_steps(
         radar,
@@ -209,10 +213,14 @@ def main():
         seed=1
     )
 
-    # calculate the max range of the radar based on the available submodes
+    cfar_params = CFARParams(
+        guard_cells=2,
+        training_cells=4,
+        threshold=1.25
+    )
 
 
-    targets = generate_targets(radar, n=100, r_min=2000.0, r_max=max_r_all)
+    targets = generate_targets(radar, n=100, r_min=2000.0, r_max=min_r_all)
 
     # Figure layout
     fig = plt.figure(figsize=(12, 8))
@@ -251,7 +259,6 @@ def main():
         sm = submodes.submodes[mode]
         op = OperatingSubmode.from_values(mode, az, el)
 
-
         # time is in ms
         update_target_positions(targets, dt=sm.time / 1000.0)
 
@@ -260,7 +267,14 @@ def main():
         target_xyz = np.array([t.position_xyz for t in targets])
 
         sig = sim.generate(targets, op, noise_sigma=0.0)
-        sig = add_noise_snr(sig, snr_db=12, noise_floor=1e-12)
+        sig = add_noise_snr(sig, snr_db=15, noise_floor=1e-12)
+
+        filtered_targets = filter_target_submode(targets, sm, op)
+
+        detections = psp_process(sig, radar, submodes, op, cfar_params)
+
+        print(f"Detections/Targets: {len(detections)}/{len(filtered_targets)}")
+
         beam = sig.sum(axis=0)
 
         raw_db = db(beam)
