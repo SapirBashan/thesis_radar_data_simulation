@@ -10,6 +10,7 @@ class SubmodeTemplate:
     num_range_gates: int
     azimuth_width: float
     elevation_width: float
+    time: float
 
     @property
     def pri(self) -> float:

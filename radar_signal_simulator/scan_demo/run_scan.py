@@ -1,3 +1,5 @@
+from typing import List
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -140,8 +142,21 @@ def generate_targets(radar_cfg, n=80, r_min=2000.0, r_max=15000.0):
         y = r * np.cos(el) * np.sin(az)
         z = r * np.sin(el)
         rcs = np.random.uniform(0.5, 5.0)
-        targets.append(Target.new([x, y, z], [0.0, 0.0, 0.0], rcs))
+        # generate random velocity
+        vx = np.random.uniform(-10.0, 10.0)
+        vy = np.random.uniform(-10.0, 10.0)
+        vz = np.random.uniform(-10.0, 10.0)
+        targets.append(Target.new([x, y, z], [vx, vy, vz], rcs))
     return targets
+
+def update_target_positions(targets: List[Target], dt: float):
+    for t in targets:
+        x, y, z = t.position_xyz
+        vx, vy, vz = t.velocity_xyz
+        x += dt * vx
+        y += dt * vy
+        z += dt * vz
+        t.position_xyz = [x, y, z]
 
 def build_scan_steps(radar, submodes, fine_prob=0.1, track_prob=0.05, confirm_prob=0.02, seed=None):
     """
@@ -194,7 +209,10 @@ def main():
         seed=1
     )
 
-    targets = generate_targets(radar, n=50)
+    # calculate the max range of the radar based on the available submodes
+
+
+    targets = generate_targets(radar, n=100, r_min=2000.0, r_max=max_r_all)
 
     # Figure layout
     fig = plt.figure(figsize=(12, 8))
@@ -219,17 +237,27 @@ def main():
     ax_avg.set_title("Matched filter, avg over PRI")
     ax_avg.grid(True, alpha=0.3)
 
-    target_xyz = np.array([t.position_xyz for t in targets])
-
     dpc_ylim_max = 1.0
     dpc_alpha = 0.1  # smoothing factor (lower = smoother)
 
+    time_elapsed = 0.0
+
     def update(i):
         nonlocal dpc_ylim_max
+        nonlocal time_elapsed
+
 
         mode, az, el, level = steps[i]
         sm = submodes.submodes[mode]
         op = OperatingSubmode.from_values(mode, az, el)
+
+
+        # time is in ms
+        update_target_positions(targets, dt=sm.time / 1000.0)
+
+        time_elapsed += sm.time
+
+        target_xyz = np.array([t.position_xyz for t in targets])
 
         sig = sim.generate(targets, op, noise_sigma=0.0)
         sig = add_noise_snr(sig, snr_db=12, noise_floor=1e-12)
@@ -284,7 +312,7 @@ def main():
         ax_3d.yaxis._axinfo["grid"]["color"] = (0.7, 0.7, 0.7, 0.4)
         ax_3d.zaxis._axinfo["grid"]["color"] = (0.7, 0.7, 0.7, 0.4)
 
-        ax_3d.scatter([0], [0], [0], c="blue", s=60, marker="x")
+        ax_3d.scatter([0], [0], [0], c="blue", s=60, marker="*", label="Radar")
         ax_3d.scatter(target_xyz[:, 0], target_xyz[:, 1], target_xyz[:, 2],
                       c="red", s=20, alpha=0.9)
 
@@ -296,7 +324,7 @@ def main():
         draw_beam_footprint(ax_3d, max_r_all, az_range, el_range)
 
         subtitle.set_text(
-            f"Mode: {mode} | Grid: {level} | Look: az={az:.1f}°, el={el:.1f}° | Step {i + 1}/{len(steps)}"
+            f"Mode: {mode} | Grid: {level} | Look: az={az:.1f}°, el={el:.1f}° | Step {i + 1}/{len(steps)} | Time {time_elapsed} ms"
         )
 
         ax_3d.view_init(elev=15, azim=-60)
