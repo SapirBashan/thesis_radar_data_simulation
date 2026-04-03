@@ -191,7 +191,7 @@ def main():
         fine_prob=0.1,
         track_prob=0.05,
         confirm_prob=0.02,
-        # seed=42
+        seed=1
     )
 
     targets = generate_targets(radar, n=50)
@@ -303,7 +303,7 @@ def main():
 
         return [img_raw, img_rd, img_avg, subtitle]
 
-    ani = FuncAnimation(fig, update, frames=len(steps), interval=500, blit=False)
+    ani = FuncAnimation(fig, update, frames=len(steps), interval=250, blit=False)
     plt.show()
 
 
