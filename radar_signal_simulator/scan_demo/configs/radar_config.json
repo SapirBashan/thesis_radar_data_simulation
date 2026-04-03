@@ -9,6 +9,6 @@
     "dx": 0.0156,
     "dy": 0.0156
   },
-  "azimuth_range": [-60.0, 60.0],
-  "elevation_range": [5.0, 30.0]
+  "azimuth_range": [-30.0, 30.0],
+  "elevation_range": [10.0, 40.0]
 }

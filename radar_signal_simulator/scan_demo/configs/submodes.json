@@ -3,8 +3,8 @@
     "fs": 20e6,
     "prf": 2000.0,
     "pulse_width": 2e-6,
-    "num_pulses": 128,
-    "num_range_gates": 2048,
+    "num_pulses": 256,
+    "num_range_gates": 1024,
     "azimuth_width": 16.0,
     "elevation_width": 8.0
   },

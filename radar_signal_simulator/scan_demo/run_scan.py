@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from matplotlib.gridspec import GridSpec
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from config.radar_config import RadarConfig
 from config.submode_config import SubmodeLibrary
@@ -9,16 +11,104 @@ from config.target import Target
 
 from radar_signal.generator import RadarSimulator
 
+C = 299792458.0
+
+
+def db(x, eps=1e-12):
+    return 10 * np.log10(np.abs(x) ** 2 + eps)
+
+
+def add_noise_snr(signal, snr_db, noise_floor=1e-12):
+    P_sig = np.mean(np.abs(signal) ** 2)
+    P_sig = max(P_sig, noise_floor)
+    P_noise = P_sig / (10 ** (snr_db / 10.0))
+    sigma = np.sqrt(P_noise)
+    noise = (sigma / np.sqrt(2)) * (
+        np.random.randn(*signal.shape) + 1j * np.random.randn(*signal.shape)
+    )
+    return signal + noise
+
+
+def matched_filter_rect(pulse_width, fs, nrg):
+    n = int(round(pulse_width * fs))
+    n = max(n, 1)
+    h = np.zeros(nrg, dtype=np.float32)
+    h[:n] = 1.0
+    return h[::-1]
+
+
+def apply_matched_filter(signal, pulse_width, fs):
+    nrg = signal.shape[0]
+    h = matched_filter_rect(pulse_width, fs, nrg)
+    H = np.fft.fft(h, n=nrg)
+    S = np.fft.fft(signal, axis=0)
+    return np.fft.ifft(S * H[:, None], axis=0)
+
+
+def range_doppler_map(signal):
+    return np.fft.fftshift(np.fft.fft(signal, axis=1), axes=1)
+
+
+def spherical_to_cart(range_m, az, el):
+    x = range_m * np.cos(el) * np.cos(az)
+    y = range_m * np.cos(el) * np.sin(az)
+    z = range_m * np.sin(el)
+    return x, y, z
+
+
+def draw_beam_footprint(ax, max_range, az_range, el_range, color="cyan", alpha=0.08):
+    az_min, az_max = az_range
+    el_min, el_max = el_range
+    origin = (0, 0, 0)
+
+    p_bl = spherical_to_cart(max_range, az_min, el_min)
+    p_br = spherical_to_cart(max_range, az_max, el_min)
+    p_tl = spherical_to_cart(max_range, az_min, el_max)
+    p_tr = spherical_to_cart(max_range, az_max, el_max)
+
+    for p in [p_bl, p_br, p_tl, p_tr]:
+        ax.plot([0, p[0]], [0, p[1]], [0, p[2]], c=color, alpha=0.6)
+
+    az_vals = np.linspace(az_min, az_max, 30)
+    el_vals = np.linspace(el_min, el_max, 30)
+
+    x, y, z = spherical_to_cart(max_range, az_vals, el_max)
+    ax.plot(x, y, z, c=color, alpha=0.6)
+    x, y, z = spherical_to_cart(max_range, az_vals, el_min)
+    ax.plot(x, y, z, c=color, alpha=0.6)
+
+    x, y, z = spherical_to_cart(max_range, az_min, el_vals)
+    ax.plot(x, y, z, c=color, alpha=0.6)
+    x, y, z = spherical_to_cart(max_range, az_max, el_vals)
+    ax.plot(x, y, z, c=color, alpha=0.6)
+
+    faces = [
+        [origin, p_bl, p_br],
+        [origin, p_tl, p_tr],
+        [origin, p_bl, p_tl],
+        [origin, p_br, p_tr],
+    ]
+    ax.add_collection3d(Poly3DCollection(faces, facecolors=color, alpha=alpha, linewidths=0))
+
+
+def _bounded_centers(min_deg, max_deg, width_deg, step_deg):
+    # keep centers so the beam (width) stays inside radar limits
+    half = width_deg / 2
+    start = min_deg + half
+    stop = max_deg - half
+    if stop < start:
+        return np.array([])  # no valid centers
+    return np.arange(start, stop + 1e-9, step_deg)
+
 
 def build_coarse_grid(radar_cfg, wide_sm):
     az_min, az_max = radar_cfg.azimuth_range
     el_min, el_max = radar_cfg.elevation_range
-
     az_step = wide_sm.azimuth_width
     el_step = wide_sm.elevation_width
 
-    az_centers = np.arange(az_min + az_step / 2, az_max, az_step)
-    el_centers = np.arange(el_min + el_step / 2, el_max, el_step)
+    az_centers = _bounded_centers(az_min, az_max, wide_sm.azimuth_width, az_step)
+    el_centers = _bounded_centers(el_min, el_max, wide_sm.elevation_width, el_step)
 
     return [(az, el) for el in el_centers for az in az_centers]
 
@@ -26,7 +116,6 @@ def build_coarse_grid(radar_cfg, wide_sm):
 def build_fine_grid(center_az, center_el, wide_sm):
     az_span = wide_sm.azimuth_width
     el_span = wide_sm.elevation_width
-
     az_step = az_span / 4.0
     el_step = el_span / 4.0
 
@@ -39,107 +128,182 @@ def build_fine_grid(center_az, center_el, wide_sm):
     return [(az, el) for el in el_centers for az in az_centers]
 
 
-def generate_targets(radar_cfg, n=50, r_min=2000.0, r_max=15000.0):
+def generate_targets(radar_cfg, n=80, r_min=2000.0, r_max=15000.0):
     az_min, az_max = radar_cfg.azimuth_range
     el_min, el_max = radar_cfg.elevation_range
-
     targets = []
     for _ in range(n):
         r = np.random.uniform(r_min, r_max)
         az = np.deg2rad(np.random.uniform(az_min, az_max))
         el = np.deg2rad(np.random.uniform(el_min, el_max))
-
         x = r * np.cos(el) * np.cos(az)
         y = r * np.cos(el) * np.sin(az)
         z = r * np.sin(el)
-
         rcs = np.random.uniform(0.5, 5.0)
         targets.append(Target.new([x, y, z], [0.0, 0.0, 0.0], rcs))
     return targets
 
-def add_noise_snr(signal, snr_db, noise_floor=1e-12):
+def build_scan_steps(radar, submodes, fine_prob=0.1, track_prob=0.05, confirm_prob=0.02, seed=None):
     """
-    Adds complex Gaussian noise to reach desired SNR.
-    If signal power is ~0, uses noise_floor instead.
+    Build scan steps with randomized fine/track/confirm inserts.
+    fine_prob: chance to add point_search for a coarse look
+    track_prob / confirm_prob: chance to add track/confirm after a coarse look
     """
-    P_sig = np.mean(np.abs(signal)**2)
-    P_sig = max(P_sig, noise_floor)   # fallback when no targets
-
-    P_noise = P_sig / (10**(snr_db / 10.0))
-    sigma = np.sqrt(P_noise)
-
-    noise = (sigma / np.sqrt(2)) * (
-        np.random.randn(*signal.shape) + 1j*np.random.randn(*signal.shape)
-    )
-    return signal + noise
-
-def main():
-    radar = RadarConfig.load("configs/radar_config.json")
-    submodes = SubmodeLibrary.load("configs/submodes.json")
-
-    sim = RadarSimulator(radar, submodes)
-
+    rng = np.random.default_rng(seed)
     wide_sm = submodes.submodes["wide_search"]
 
     steps = []
     coarse_grid = build_coarse_grid(radar, wide_sm)
 
     for (azc, elc) in coarse_grid:
+        # always add the coarse step
         steps.append(("wide_search", azc, elc, "coarse"))
-        fine_grid = build_fine_grid(azc, elc, wide_sm)
-        for (azf, elf) in fine_grid:
-            steps.append(("point_search", azf, elf, "fine"))
 
-    # Random targets inside radar FOV
-    targets = generate_targets(radar, n=80)
+        # sometimes add fine (point_search)
+        if rng.random() < fine_prob:
+            for (azf, elf) in build_fine_grid(azc, elc, wide_sm):
+                steps.append(("point_search", azf, elf, "fine"))
 
-    # Initialize plot with wide_search size
-    img = None
-    fig, ax = plt.subplots(figsize=(12, 8))
-    img = ax.imshow(
-        np.zeros((wide_sm.num_pulses, wide_sm.num_range_gates)),
-        origin="lower",
-        aspect="auto",
-        cmap="viridis"
+        # sprinkle track / confirm
+        if rng.random() < track_prob:
+            steps.append(("track", azc, elc, "track"))
+
+        if rng.random() < confirm_prob:
+            steps.append(("confirm", azc, elc, "confirm"))
+
+    return steps
+
+def main():
+    radar = RadarConfig.load("configs/radar_config.json")
+    submodes = SubmodeLibrary.load("configs/submodes.json")
+    sim = RadarSimulator(radar, submodes)
+
+    wide_sm = submodes.submodes["wide_search"]
+
+    max_r_all = max(
+        sm.num_range_gates * C / (2 * sm.fs)
+        for sm in submodes.submodes.values()
     )
-    fig.supxlabel("Range gate")
-    fig.supylabel("PRI index")
-    title = ax.set_title("")
 
-    info_text = ax.text(
-        0.02, 0.98, "",
-        transform=ax.transAxes,
-        va="top", ha="left",
-        bbox=dict(facecolor="black", alpha=0.4, edgecolor="none"),
-        color="white", fontsize=10
+    steps = build_scan_steps(
+        radar,
+        submodes,
+        fine_prob=0.1,
+        track_prob=0.05,
+        confirm_prob=0.02,
+        # seed=42
     )
+
+    targets = generate_targets(radar, n=50)
+
+    # Figure layout
+    fig = plt.figure(figsize=(12, 8))
+    fig.suptitle("Radar Scan Demo", fontsize=14)
+    subtitle = fig.text(0.5, 0.94, "", ha="center", va="top", fontsize=10)
+
+    gs = GridSpec(2, 2, figure=fig)
+
+    ax_raw = fig.add_subplot(gs[0, 0])
+    ax_rd = fig.add_subplot(gs[0, 1])
+    ax_3d = fig.add_subplot(gs[1, 0], projection="3d")
+    ax_avg = fig.add_subplot(gs[1, 1])
+
+    img_raw = ax_raw.imshow(np.zeros((wide_sm.num_pulses, wide_sm.num_range_gates)),
+                            origin="lower", aspect="auto", cmap="viridis")
+    img_rd = ax_rd.imshow(np.zeros((wide_sm.num_pulses, wide_sm.num_range_gates)),
+                          origin="lower", aspect="auto", cmap="viridis")
+    img_avg = ax_avg.plot(np.zeros(wide_sm.num_range_gates))[0]
+
+    ax_raw.set_title("Raw power (DBF sum)")
+    ax_rd.set_title("Range-Doppler map")
+    ax_avg.set_title("Matched filter, avg over PRI")
+    ax_avg.grid(True, alpha=0.3)
+
+    target_xyz = np.array([t.position_xyz for t in targets])
+
+    dpc_ylim_max = 1.0
+    dpc_alpha = 0.1  # smoothing factor (lower = smoother)
 
     def update(i):
+        nonlocal dpc_ylim_max
+
         mode, az, el, level = steps[i]
         sm = submodes.submodes[mode]
         op = OperatingSubmode.from_values(mode, az, el)
 
         sig = sim.generate(targets, op, noise_sigma=0.0)
-        sig = add_noise_snr(sig, snr_db=15, noise_floor=1e-15)
+        sig = add_noise_snr(sig, snr_db=12, noise_floor=1e-12)
+        beam = sig.sum(axis=0)
 
-        beam = sig.sum(axis=0)  # DBF sum
-        power = np.abs(beam) ** 2
-        power_db = 10 * np.log10(power + 1e-12)
+        raw_db = db(beam)
+        img_raw.set_data(raw_db.T)
+        img_raw.set_extent([0, sm.num_range_gates - 1, 0, sm.num_pulses - 1])
+        lo, hi = np.percentile(raw_db, [5, 99])
+        img_raw.set_clim(lo, hi)
 
-        # update image data
-        img.set_data(power_db.T)
-        img.set_extent([0, sm.num_range_gates - 1, 0, sm.num_pulses - 1])
-        img.set_clim(np.percentile(power_db, 5), np.percentile(power_db, 95))
+        rd = range_doppler_map(beam)
+        rd_db = db(rd)
+        img_rd.set_data(rd_db.T)
+        img_rd.set_extent([0, sm.num_range_gates - 1, -sm.num_pulses // 2, sm.num_pulses // 2 - 1])
+        lo, hi = np.percentile(rd_db, [5, 99])
+        img_rd.set_clim(lo, hi)
 
-        title.set_text(f"{mode} | step {i+1}/{len(steps)}")
-        info_text.set_text(
-            f"Mode: {mode}\n"
-            f"Grid: {level}\n"
-            f"Look: az={az:.1f}°, el={el:.1f}°"
+        mf = apply_matched_filter(beam, sm.pulse_width, sm.fs)
+        avg = np.mean(np.abs(mf) ** 2, axis=1)
+        x = np.arange(sm.num_range_gates)
+        img_avg.set_data(x, avg)
+
+        # let matplotlib autoscale y each frame
+        ax_avg.relim()
+        ax_avg.autoscale_view(scalex=False, scaley=True)
+        ax_avg.set_xlim(0, sm.num_range_gates - 1)
+
+        # 3D beam
+        ax_3d.clear()
+
+        ax_3d.set_xlim(-max_r_all, max_r_all)
+        ax_3d.set_ylim(-max_r_all, max_r_all)
+        ax_3d.set_zlim(0, max_r_all)
+        ax_3d.set_xlabel("X")
+        ax_3d.set_ylabel("Y")
+        ax_3d.set_zlabel("Z")
+
+        ticks_xy = np.linspace(-max_r_all, max_r_all, 7)
+        ticks_z = np.linspace(0, max_r_all, 6)
+        ax_3d.set_xticks(ticks_xy)
+        ax_3d.set_yticks(ticks_xy)
+        ax_3d.set_zticks(ticks_z)
+        ax_3d.set_xticklabels([])
+        ax_3d.set_yticklabels([])
+        ax_3d.set_zticklabels([])
+
+        ax_3d.grid(True, alpha=0.3)
+        ax_3d.view_init(elev=20., azim=-35)
+
+        ax_3d.xaxis._axinfo["grid"]["color"] = (0.7, 0.7, 0.7, 0.4)
+        ax_3d.yaxis._axinfo["grid"]["color"] = (0.7, 0.7, 0.7, 0.4)
+        ax_3d.zaxis._axinfo["grid"]["color"] = (0.7, 0.7, 0.7, 0.4)
+
+        ax_3d.scatter([0], [0], [0], c="blue", s=60, marker="x")
+        ax_3d.scatter(target_xyz[:, 0], target_xyz[:, 1], target_xyz[:, 2],
+                      c="red", s=20, alpha=0.9)
+
+        az_range = (np.deg2rad(az - sm.azimuth_width / 2),
+                    np.deg2rad(az + sm.azimuth_width / 2))
+        el_range = (np.deg2rad(el - sm.elevation_width / 2),
+                    np.deg2rad(el + sm.elevation_width / 2))
+
+        draw_beam_footprint(ax_3d, max_r_all, az_range, el_range)
+
+        subtitle.set_text(
+            f"Mode: {mode} | Grid: {level} | Look: az={az:.1f}°, el={el:.1f}° | Step {i + 1}/{len(steps)}"
         )
-        return [img, title, info_text]
 
-    ani = FuncAnimation(fig, update, frames=len(steps), interval=200, blit=False)
+        ax_3d.view_init(elev=15, azim=-60)
+
+        return [img_raw, img_rd, img_avg, subtitle]
+
+    ani = FuncAnimation(fig, update, frames=len(steps), interval=500, blit=False)
     plt.show()
 
 
