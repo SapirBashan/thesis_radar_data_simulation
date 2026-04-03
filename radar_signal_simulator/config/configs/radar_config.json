@@ -1,0 +1,16 @@
+{
+  "fc": 9.6e9,
+  "tx_power": 1000.0,
+  "tx_gain": 30.0,
+  "rx_gain": 30.0,
+
+  "array": {
+    "rows": 4,
+    "cols": 4,
+    "dx": 0.0156,
+    "dy": 0.0156
+  },
+
+  "azimuth_range": [-60.0, 60.0],
+  "elevation_range": [-10.0, 10.0]
+}
