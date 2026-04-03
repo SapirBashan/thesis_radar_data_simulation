@@ -60,7 +60,7 @@ def main():
     rd_mag = 20 * np.log10(np.abs(rd) + 1e-12)
 
     # Axes
-    ranges = np.arange(cfg.num_range_gates) * (C / (2 * cfg.fs))
+    ranges = np.arange(cfg.submode.nrg) * (C / (2 * cfg.fs))
     doppler_bins = np.arange(cfg.num_pulses) - cfg.num_pulses // 2
     doppler_freq = doppler_bins * (cfg.prf / cfg.num_pulses)
 
@@ -76,7 +76,7 @@ def main():
     plt.show()
 
     # plot an average over pri
-    range_bins = np.arange(cfg.num_range_gates) * (C / (2 * cfg.fs))
+    range_bins = np.arange(cfg.submode.nrg) * (C / (2 * cfg.fs))
 
     avg_pri = np.abs(np.mean(data_mf, axis=0)) ** 2
 

@@ -7,10 +7,18 @@
   "tx_power": 1000.0,
   "tx_gain": 30.0,
   "rx_gain": 30.0,
-  "noise_figure": 4.0,
   "noise_level": -15.0,
-  "num_range_gates": 2048,
-  "num_doppler_bins": 256,
+  "submodes": {
+    "NAV": {
+      "num_range_gates": 2048,
+      "num_doppler_bins": 256
+    },
+    "TA_TAMAS": {
+      "num_range_gates": 1024,
+      "num_doppler_bins": 512
+    }
+  },
+  "active_submode": "NAV",
   "array": {
     "rows": 4,
     "cols": 4,

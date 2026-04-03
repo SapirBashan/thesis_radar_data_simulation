@@ -9,6 +9,19 @@ class ArrayConfig:
     dy: float
 
 @dataclass
+class SubmodeConfig:
+    num_range_gates: int
+    num_doppler_bins: int
+
+    @property
+    def npri(self) -> int:
+        return self.num_doppler_bins
+
+    @property
+    def nrg(self) -> int:
+        return self.num_range_gates
+
+@dataclass
 class RadarConfig:
     fc: float
     prf: float
@@ -18,10 +31,11 @@ class RadarConfig:
     tx_power: float
     tx_gain: float
     rx_gain: float
-    noise_figure: float
     noise_level: float
-    num_range_gates: int
-    num_doppler_bins: int
+
+    submodes: dict
+    active_submode: str
+
     array: ArrayConfig
 
     @property
@@ -32,6 +46,11 @@ class RadarConfig:
     def wavelength(self) -> float:
         c = 299792458.0
         return c / self.fc
+
+    @property
+    def submode(self) -> SubmodeConfig:
+        sm = self.submodes[self.active_submode]
+        return SubmodeConfig(**sm)
 
     @staticmethod
     def save(cfg, path: str) -> None:

@@ -4,6 +4,10 @@ from .target import Target
 
 C = 299792458.0
 
+def _db_to_linear(db: float):
+    return 10 ** (db / 10)
+
+
 class RadarSignalGenerator:
     def __init__(self, cfg: RadarConfig):
         self.cfg = cfg
@@ -25,9 +29,6 @@ class RadarSignalGenerator:
         phase = 2 * np.pi / lam * (xv * kx + yv * ky)
         return np.exp(1j * phase).reshape(-1)  # (num_elems,)
 
-    def _db_to_linear(self, db: float):
-        return 10 ** (db / 10)
-
     def generate(self, targets: list[Target]) -> np.ndarray:
         """
         Returns:
@@ -35,12 +36,12 @@ class RadarSignalGenerator:
         """
         cfg = self.cfg
         num_elems = cfg.array.rows * cfg.array.cols
-        signal = np.zeros((num_elems, cfg.num_pulses, cfg.num_range_gates), dtype=np.complex64)
+        signal = np.zeros((num_elems, cfg.submode.npri, cfg.submode.nrg), dtype=np.complex64)
 
         signal_shape = signal.shape
 
-        t_fast = np.arange(cfg.num_range_gates) / cfg.fs  # fast time within PRI
-        pulse_times = np.arange(cfg.num_pulses) * cfg.pri  # slow time
+        t_fast = np.arange(cfg.submode.nrg) / cfg.fs  # fast time within PRI
+        pulse_times = np.arange(cfg.submode.npri) * cfg.pri  # slow time
 
         for tgt in targets:
             # Range delay -> sample index
@@ -69,7 +70,7 @@ class RadarSignalGenerator:
             signal += a[:, None, None] * target_cube[None, :, :]
 
         # Add noise
-        sigma = self._db_to_linear(self.cfg.noise_level)
+        sigma = _db_to_linear(self.cfg.noise_level)
         mu = 0.0
         noise = np.random.normal(mu, sigma, signal_shape) + 1j * np.random.normal(mu, sigma, signal_shape)
 
