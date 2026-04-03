@@ -1,6 +1,6 @@
 {
   "fc": 9.6e9,
-  "tx_power": 1000.0,
+  "tx_power": 10.0,
   "tx_gain": 30.0,
   "rx_gain": 30.0,
 
