@@ -1,0 +1,38 @@
+{
+  "wide_search": {
+    "fs": 20e6,
+    "prf": 2000.0,
+    "pulse_width": 2e-6,
+    "num_pulses": 128,
+    "num_range_gates": 2048,
+    "azimuth_width": 16.0,
+    "elevation_width": 8.0
+  },
+  "point_search": {
+    "fs": 40e6,
+    "prf": 4000.0,
+    "pulse_width": 1e-6,
+    "num_pulses": 128,
+    "num_range_gates": 2048,
+    "azimuth_width": 4.0,
+    "elevation_width": 2.0
+  },
+  "track": {
+    "fs": 60e6,
+    "prf": 6000.0,
+    "pulse_width": 0.8e-6,
+    "num_pulses": 256,
+    "num_range_gates": 4096,
+    "azimuth_width": 2.0,
+    "elevation_width": 1.0
+  },
+  "confirm": {
+    "fs": 30e6,
+    "prf": 3000.0,
+    "pulse_width": 1.5e-6,
+    "num_pulses": 64,
+    "num_range_gates": 2048,
+    "azimuth_width": 3.0,
+    "elevation_width": 1.5
+  }
+}
