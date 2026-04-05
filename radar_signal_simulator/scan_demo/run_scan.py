@@ -1,5 +1,7 @@
 from typing import List
 
+from collections import deque
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -160,7 +162,7 @@ def update_target_positions(targets: List[Target], dt: float):
         z += dt * vz
         t.position_xyz = [x, y, z]
 
-def build_scan_steps(radar, submodes, fine_prob=0.1, track_prob=0.05, confirm_prob=0.02, seed=None):
+def build_scan_steps(radar, submodes, fine_prob=0.1, track_prob=0.05, confirm_prob=0.02, repeat = 1, seed=None):
     """
     Build scan steps with randomized fine/track/confirm inserts.
     fine_prob: chance to add point_search for a coarse look
@@ -170,30 +172,42 @@ def build_scan_steps(radar, submodes, fine_prob=0.1, track_prob=0.05, confirm_pr
     wide_sm = submodes.submodes["wide_search"]
 
     steps = []
-    coarse_grid = build_coarse_grid(radar, wide_sm)
 
-    for (azc, elc) in coarse_grid:
-        # always add the coarse step
-        steps.append(("wide_search", azc, elc, "coarse"))
+    for _ in range(repeat):
+        for (azc, elc) in build_coarse_grid(radar, wide_sm):
+            # always add the coarse step
+            steps.append(("wide_search", azc, elc, "coarse"))
 
-        # sometimes add fine (point_search)
-        if rng.random() < fine_prob:
-            for (azf, elf) in build_fine_grid(azc, elc, wide_sm):
-                steps.append(("point_search", azf, elf, "fine"))
+            # sometimes add fine (point_search)
+            if rng.random() < fine_prob:
+                for (azf, elf) in build_fine_grid(azc, elc, wide_sm):
+                    steps.append(("point_search", azf, elf, "fine"))
 
-        # sprinkle track / confirm
-        if rng.random() < track_prob:
-            steps.append(("track", azc, elc, "track"))
+            # sprinkle track / confirm
+            if rng.random() < track_prob:
+                steps.append(("track", azc, elc, "track"))
 
-        if rng.random() < confirm_prob:
-            steps.append(("confirm", azc, elc, "confirm"))
+            if rng.random() < confirm_prob:
+                steps.append(("confirm", azc, elc, "confirm"))
 
     return steps
+
+def detections_to_xyz(detections):
+    pts = []
+    for det in detections:
+        az = np.deg2rad(det.azimuth)
+        el = np.deg2rad(det.elevation)
+        x, y, z = spherical_to_cart(det.range, az, el)
+        pts.append([x, y, z])
+    return np.array(pts) if pts else np.empty((0, 3))
 
 def main():
     radar = RadarConfig.load("configs/radar_config.json")
     submodes = SubmodeLibrary.load("configs/submodes.json")
     sim = RadarSimulator(radar, submodes)
+
+    viz_mode = "targets"  # or "detections"
+    det_history = deque(maxlen=20)
 
     wide_sm = submodes.submodes["wide_search"]
 
@@ -208,19 +222,20 @@ def main():
         radar,
         submodes,
         fine_prob=0.1,
-        track_prob=0.05,
-        confirm_prob=0.02,
-        seed=1
+        track_prob=0.1,
+        confirm_prob=0.1,
+        repeat=10,
+        # seed=1
     )
 
     cfar_params = CFARParams(
-        guard_cells=8,
+        guard_cells=12,
         training_cells=8,
-        threshold=1.3
+        threshold=1.5
     )
 
 
-    targets = generate_targets(radar, n=10, r_min=2000.0, r_max=min_r_all)
+    targets = generate_targets(radar, n=50, r_min=2000.0, r_max=min_r_all)
 
     # Figure layout
     fig = plt.figure(figsize=(12, 8))
@@ -274,15 +289,25 @@ def main():
         target_xyz = np.array([t.position_xyz for t in targets])
 
         sig = sim.generate(targets, op, noise_sigma=0.0)
-        sig = add_noise_snr(sig, snr_db=15, noise_floor=1e-12)
+        sig = add_noise_snr(sig, snr_db=20, noise_floor=1e-12)
 
         filtered_targets = filter_target_submode(targets, sm, op)
 
         detections = psp_process(sig, radar, submodes, op, cfar_params)
 
+        det_history.append(detections)
+
+        all_detections = [d for frame in det_history for d in frame]
+        detections_xyz = detections_to_xyz(all_detections)
+
         print(f"Detections/Targets: {len(detections)}/{len(filtered_targets)}")
 
-        beam = sig.sum(axis=0)  # local visualization only
+        if viz_mode == "targets":
+            point_xyz = target_xyz
+        else:
+            point_xyz = detections_xyz
+
+        beam = sig.sum(axis=0)
 
         raw_db = db(beam)
         img_raw.set_data(raw_db.T)
@@ -357,8 +382,10 @@ def main():
         ax_3d.zaxis._axinfo["grid"]["color"] = (0.7, 0.7, 0.7, 0.4)
 
         ax_3d.scatter([0], [0], [0], c="blue", s=60, marker="*", label="Radar")
-        ax_3d.scatter(target_xyz[:, 0], target_xyz[:, 1], target_xyz[:, 2],
-                      c="red", s=20, alpha=0.9)
+
+        if point_xyz.size > 0:
+            ax_3d.scatter(point_xyz[:, 0], point_xyz[:, 1], point_xyz[:, 2],
+                          c="red", s=20, alpha=0.9)
 
         az_range = (np.deg2rad(az - sm.azimuth_width / 2),
                     np.deg2rad(az + sm.azimuth_width / 2))
@@ -375,7 +402,7 @@ def main():
 
         return [img_raw, img_rd, line_dpc, line_thr, det_scatter, subtitle]
 
-    ani = FuncAnimation(fig, update, frames=len(steps), interval=1000, blit=False)
+    ani = FuncAnimation(fig, update, frames=len(steps), interval=100, blit=False)
     plt.show()
 
 
