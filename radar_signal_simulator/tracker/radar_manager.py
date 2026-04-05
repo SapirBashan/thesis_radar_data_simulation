@@ -76,13 +76,14 @@ def _xyz_to_polar(xyz: np.ndarray) -> tuple[float, float, float]:
 def _match_detection_to_track(
     xyz: np.ndarray,
     tracks: dict[str, Track],
+    updated_this_step: set[str],
     gate_m: float = 500.0,
 ) -> Optional[Track]:
-    """Nearest-neighbour gating in XYZ space."""
+    """Nearest-neighbour gating in XYZ space, ignoring already updated tracks."""
     best_track = None
     best_dist  = gate_m
     for tr in tracks.values():
-        if tr.state == TrackState.DROPPED:
+        if tr.state == TrackState.DROPPED or tr.id in updated_this_step:
             continue
         d = float(np.linalg.norm(xyz - tr.kalman.position_xyz))
         if d < best_dist:
@@ -243,12 +244,9 @@ class RadarManager:
         """
         self.sim_time_ms += beam_time_ms
 
-        # filter by SNR
-        # detections = [d for d in detections if d.snr >= self.snr_min_db]
-
-
         new_ids: list[str] = []
         dropped_ids: list[str] = []
+        updated_this_step = set()
 
         # predict all active tracks to current time
         for tr in self.tracks.values():
@@ -258,7 +256,9 @@ class RadarManager:
         # ---- handle detections ----------------------------------------
         for det in detections:
             xyz = _det_to_xyz(det)
-            matched = _match_detection_to_track(xyz, self.tracks, self.gate_m)
+
+            # Pass updated_this_step into the matcher to prevent swallowing detections
+            matched = _match_detection_to_track(xyz, self.tracks, updated_this_step, self.gate_m)
 
             if matched is None:
                 # new contact — only from coarse / fine beams
@@ -271,27 +271,24 @@ class RadarManager:
                     self.tracks[tr.id] = tr
                     new_ids.append(tr.id)
                     self._enqueue_fine(tr)
+
+                    updated_this_step.add(tr.id)
             else:
                 self._advance_state(matched, xyz, det, beam)
+                updated_this_step.add(matched.id)
 
         # ---- handle misses for tracks that expected a return -----------
         for tr in self.tracks.values():
             if tr.state == TrackState.DROPPED:
                 continue
-            if tr.pending_beam is None:
-                continue
-            pend_az, pend_el = tr.pending_beam
-            if abs(pend_az - beam.az) < 0.1 and abs(pend_el - beam.el) < 0.1:
-                # this beam was meant for this track but no detection matched
-                tr.register_miss()
-                tr.pending_beam = None
-                dropped_ids += self._handle_miss(tr)
 
-        # ---- purge dropped tracks -------------------------------------
-        for tid in list(self.tracks.keys()):
-            if self.tracks[tid].state == TrackState.DROPPED:
-                dropped_ids.append(tid)
-                # keep in dict for history display but mark dropped
+            # Check explicitly if THIS beam was meant for THIS track
+            if beam.track_id == tr.id:
+                # If the track wasn't updated by a detection, it missed
+                if tr.id not in updated_this_step:
+                    tr.register_miss()
+                    tr.pending_beam = None
+                    dropped_ids += self._handle_miss(tr)
 
         return StepResult(
             beam=beam,

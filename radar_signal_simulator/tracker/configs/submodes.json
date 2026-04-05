@@ -8,7 +8,7 @@
     "azimuth_width": 16.0,
     "elevation_width": 8.0,
     "time": 128.0,
-    "cfar": { "guard_cells": 8, "training_cells": 16, "threshold": 1.25 }
+    "cfar": { "guard_cells": 3, "training_cells": 32, "threshold": 1.5 }
   },
   "fine_search": {
     "fs": 40e6,
@@ -19,7 +19,7 @@
     "azimuth_width": 2.0,
     "elevation_width": 1.0,
     "time": 85.0,
-    "cfar": { "guard_cells": 12, "training_cells": 24, "threshold": 1.5 }
+    "cfar": { "guard_cells": 3, "training_cells": 40, "threshold": 1.5 }
   },
   "confirm": {
     "fs": 60e6,
@@ -30,7 +30,7 @@
     "azimuth_width": 1.0,
     "elevation_width": 0.5,
     "time": 102.0,
-    "cfar": { "guard_cells": 16, "training_cells": 32, "threshold": 1.8 }
+    "cfar": { "guard_cells": 4, "training_cells": 48, "threshold": 1.5 }
   },
   "track": {
     "fs": 100e6,
@@ -41,6 +41,6 @@
     "azimuth_width": 0.5,
     "elevation_width": 0.25,
     "time": 64.0,
-    "cfar": { "guard_cells": 20, "training_cells": 40, "threshold": 2.0 }
+    "cfar": { "guard_cells": 4, "training_cells": 64, "threshold": 1.5 }
   }
 }

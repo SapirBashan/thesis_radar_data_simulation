@@ -1,17 +1,9 @@
 """
-PPI (Plan Position Indicator) demo for RadarManager.
+Radar debug display — 3 panels:
 
-Top-down radar display:
-  - Concentric range rings
-  - Radar at centre
-  - Beam sweep shown as a fading sector (colour = submode)
-  - Detections as bright dots
-  - Real target positions overlaid as white '+' markers
-  - Confirmed tracks as coloured lines (hit_history)
-  - Track state shown as marker shape:
-        FINE    = circle
-        CONFIRM = triangle
-        TRACKED = diamond
+  Top-left  : Range-Doppler map (dB, after DBF sum)
+  Top-right : DPC power + CFAR threshold + detection markers
+  Bottom    : PPI — true targets, detections, tracks
 """
 
 import sys
@@ -21,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ""))
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.gridspec as gridspec
 import matplotlib.cm as cm
 from matplotlib.animation import FuncAnimation
 from matplotlib.lines import Line2D
@@ -30,37 +23,50 @@ from config.submode_config import SubmodeLibrary
 from config.target import Target
 from radar_signal.generator import RadarSimulator
 from psp import psp_process, CFARParams
+from psp.dbf import dbf_bfcu_mode
+from psp.dpc import dpc
+from psp.cfar import cfar_1d
 
 from tracker.radar_manager import RadarManager, StepResult
 from tracker.track import TrackState
 
 C0 = 299_792_458.0
+EPS = 1e-12
 
 
-# ── coordinate helpers (original convention) ──────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────
 
-def _polar_to_ppi(range_m: float, az_deg: float, el_deg: float = 0.0):
-    """x = R*cos(az), y = R*sin(az)  — matches sim XYZ convention."""
-    az_r = np.deg2rad(az_deg)
-    el_r = np.deg2rad(el_deg)
-    rg   = range_m * np.cos(el_r)
-    return rg * np.cos(az_r), rg * np.sin(az_r)
+def _db(x):
+    return 10.0 * np.log10(np.abs(x) ** 2 + EPS)
 
-
-def _xyz_to_ppi(xyz):
-    """Sim x=East, y=North maps directly to screen x, y."""
-    return float(xyz[0]), float(xyz[1])
-
-
-# ── simulation helpers ─────────────────────────────────────────────────
 
 def _add_noise(signal, snr_db=20.0):
-    P     = max(np.mean(np.abs(signal) ** 2), 1e-12)
+    P     = max(np.mean(np.abs(signal) ** 2), EPS)
     sigma = np.sqrt(P / (10 ** (snr_db / 10.0)))
     noise = (sigma / np.sqrt(2)) * (
         np.random.randn(*signal.shape) + 1j * np.random.randn(*signal.shape)
     )
     return signal + noise
+
+
+def _polar_to_ppi(range_m, az_deg, el_deg=0.0):
+   # convert to xyz
+   def spherical_to_cart(range_m, az, el):
+       x = range_m * np.cos(el) * np.cos(az)
+       y = range_m * np.cos(el) * np.sin(az)
+       z = range_m * np.sin(el)
+       return x, y, z
+
+   # Convert degrees to radians before doing the math!
+   az_rad = np.deg2rad(az_deg)
+   el_rad = np.deg2rad(el_deg)
+
+   x, y, z = spherical_to_cart(range_m, az_rad, el_rad)
+   return x, y
+
+
+def _xyz_to_ppi(xyz):
+    return float(xyz[0]), float(xyz[1])
 
 
 def _generate_targets(radar, n=40, r_min=3000.0, r_max=12000.0):
@@ -88,7 +94,7 @@ def _move_targets(targets, dt_s):
 
 # ── colour palette ────────────────────────────────────────────────────
 
-_CMAP               = cm._colormaps["tab20"].resampled(20)   # no deprecation warning
+_CMAP               = cm._colormaps["tab20"].resampled(20)
 _track_color_cache: dict[str, tuple] = {}
 _color_idx          = 0
 
@@ -116,6 +122,63 @@ BEAM_COLOR = {
 }
 
 
+# ── signal processing helpers (mirrors psp_process internals) ─────────
+
+def _compute_rd_and_cfar(sig, sm, cfar_params, fc):
+    """
+    Returns
+    -------
+    rd_db      : (n_rg, n_pri) range-Doppler power in dB
+    dpc_pow    : (n_rg,)       DPC power (summed over PRI)
+    noise_floor: (n_rg,)       CFAR noise estimate
+    det_mask   : (n_rg,) bool  CFAR detections
+    range_axis : (n_rg,) m     range per gate
+    vel_axis   : (n_pri,) m/s  Doppler velocity axis
+    """
+    # DBF
+    x_dbf = dbf_bfcu_mode(sig)  # (n_rg, n_pri)
+
+    # Extract shape from the beamformed signal, NOT the raw 3D signal
+    n_rg = x_dbf.shape[0]
+    n_pri = x_dbf.shape[1]
+
+    x_dbf_3d = x_dbf[np.newaxis, :]  # (1, n_rg, n_pri)
+
+    # DPC (matched filter)
+    x_dpc = dpc(x_dbf_3d, fs=sm.fs,
+                pulse_width=sm.pulse_width)  # (1, n_rg, n_pri)
+    # x_dpc = np.mean(x_dpc, axis=0)
+    x_dpc = x_dpc.reshape(n_rg, n_pri)
+
+    # Range-Doppler map
+    rd     = np.fft.fftshift(np.fft.fft(x_dpc, axis=1), axes=1)
+    rd_db  = _db(rd)                                    # (n_rg, n_pri)
+
+    # DPC power for CFAR
+    dpc_pow = np.sum(np.abs(x_dpc) ** 2, axis=1)       # (n_rg,)
+    dpc_pow_2d = dpc_pow[:, np.newaxis]                 # (n_rg, 1)
+
+    noise_2d, det_2d = cfar_1d(
+        dpc_pow_2d,
+        cfar_params.guard_cells,
+        cfar_params.training_cells,
+        cfar_params.threshold,
+    )
+
+    noise_floor = noise_2d[:, 0]
+    det_mask    = det_2d[:, 0].astype(bool)
+
+    # axes
+    range_axis = np.arange(n_rg) * C0 / (2.0 * sm.fs)
+
+    prf = sm.prf
+    # fc  = getattr(sm, "fc", None)
+    lam      = C0 / fc
+    vel_axis = np.fft.fftshift(np.fft.fftfreq(n_pri, d=1.0 / prf)) * lam / 2.0
+
+    return rd_db, dpc_pow, noise_floor, det_mask, range_axis, vel_axis
+
+
 # ── main ───────────────────────────────────────────────────────────────
 
 def main():
@@ -125,64 +188,117 @@ def main():
 
     mgr  = RadarManager(radar, submodes, max_misses=15, gate_m=500.0)
 
-    targets = _generate_targets(radar, n=100)
+    targets = _generate_targets(radar, n=10, r_min=500.0, r_max=5000.0)
 
     max_r = max(
         sm.num_range_gates * C0 / (2 * sm.fs)
         for sm in submodes.submodes.values()
     )
 
-    # ── figure ────────────────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(8, 8), facecolor="#0a0a1a")
-    ax.set_facecolor("#0a0a1a")
-    ax.set_aspect("equal")
-    ax.set_xlim(-max_r, max_r)
-    ax.set_ylim(-max_r, max_r)
-    ax.axis("off")
-    fig.suptitle("Radar PPI Display", color="white", fontsize=13)
-
-    status_text = ax.text(
-        0.01, 0.99, "", transform=ax.transAxes,
-        color="white", fontsize=8, va="top", family="monospace"
+    # ── layout ────────────────────────────────────────────────────────
+    #
+    #   gs[0,0]  Range-Doppler map
+    #   gs[0,1]  CFAR / DPC power
+    #   gs[1,:]  PPI  (spans both columns)
+    #
+    fig = plt.figure(figsize=(12, 8), facecolor="#0a0a1a")
+    gs  = gridspec.GridSpec(
+        2, 2,
+        figure=fig,
+        height_ratios=[1, 1.4],
+        hspace=0.35,
+        wspace=0.30,
     )
 
-    # range rings
+    ax_rd   = fig.add_subplot(gs[0, 0])
+    ax_cfar = fig.add_subplot(gs[0, 1])
+    ax_ppi  = fig.add_subplot(gs[1, :])
+
+    for ax in (ax_rd, ax_cfar, ax_ppi):
+        ax.set_facecolor("#0d1117")
+        for sp in ax.spines.values():
+            sp.set_color("#1e3a5f")
+        ax.tick_params(colors="#7a9abf", labelsize=7)
+        ax.xaxis.label.set_color("#7a9abf")
+        ax.yaxis.label.set_color("#7a9abf")
+        ax.title.set_color("white")
+
+    fig.suptitle("Radar Debug Display", color="white", fontsize=12)
+
+    # ── Range-Doppler panel ───────────────────────────────────────────
+    ax_rd.set_title("Range-Doppler map  (dB)")
+    ax_rd.set_xlabel("Doppler bin")
+    ax_rd.set_ylabel("Range gate")
+
+    # placeholder image — resized each frame
+    _wide = submodes.submodes["coarse_search"]
+    img_rd = ax_rd.imshow(
+        np.zeros((_wide.num_range_gates, _wide.num_pulses)),
+        origin="lower", aspect="auto", cmap="inferno",
+        interpolation="nearest",
+    )
+    cb_rd = fig.colorbar(img_rd, ax=ax_rd, fraction=0.046, pad=0.04)
+    cb_rd.ax.tick_params(colors="#7a9abf", labelsize=6)
+
+    # ── CFAR panel ────────────────────────────────────────────────────
+    ax_cfar.set_title("DPC power + CFAR threshold")
+    ax_cfar.set_xlabel("Range (km)")
+    ax_cfar.set_ylabel("Power (linear)")
+    ax_cfar.grid(True, color="#1e3a5f", lw=0.5)
+
+    line_pow,  = ax_cfar.plot([], [], color="#4fc3f7", lw=0.9, label="DPC power")
+    line_thr,  = ax_cfar.plot([], [], color="#ff8a65", lw=0.9, ls="--", label="CFAR thr")
+    line_dets  = ax_cfar.scatter([], [], c="yellow", s=25, zorder=5, label="Detections")
+    ax_cfar.legend(fontsize=7, facecolor="#0d1117", edgecolor="#1e3a5f",
+                   labelcolor="white", loc="upper right")
+
+    # target range lines (redrawn per frame)
+    _cfar_tgt_lines: list = []
+
+    # ── PPI panel ─────────────────────────────────────────────────────
+    ax_ppi.set_aspect("equal")
+    ax_ppi.set_xlim(-max_r, max_r)
+    ax_ppi.set_ylim(-max_r, max_r)
+    ax_ppi.axis("off")
+    ax_ppi.set_title("PPI", pad=6)
+
     for r in np.linspace(max_r / 5, max_r, 5):
-        ax.add_patch(plt.Circle((0, 0), r, color="#1e3a5f", fill=False, lw=0.8))
+        ax_ppi.add_patch(plt.Circle((0, 0), r, color="#1e3a5f", fill=False, lw=0.7))
         lx, ly = _polar_to_ppi(r * 0.97, 45.0)
-        ax.text(lx, ly, f"{r/1000:.0f} km", color="#4a7fa5", fontsize=7)
+        ax_ppi.text(lx, ly, f"{r/1000:.0f} km", color="#4a7fa5", fontsize=6)
 
-    # cross-hairs
-    ax.axhline(0, color="#1e3a5f", lw=0.5)
-    ax.axvline(0, color="#1e3a5f", lw=0.5)
+    ax_ppi.axhline(0, color="#1e3a5f", lw=0.4)
+    ax_ppi.axvline(0, color="#1e3a5f", lw=0.4)
+    ax_ppi.plot(0, 0, "*", color="#00e5ff", ms=10, zorder=10)
 
-    # radar marker
-    ax.plot(0, 0, "*", color="#00e5ff", ms=12, zorder=10)
+    ppi_status = ax_ppi.text(
+        0.01, 0.99, "", transform=ax_ppi.transAxes,
+        color="white", fontsize=7, va="top", family="monospace",
+    )
 
-    # legend
     legend_items = [
-        Line2D([0], [0], marker="P", color="white",   ms=7, label="True target",   linestyle="None"),
-        Line2D([0], [0], marker="s", color="#4fc3f7", ms=6, label="Det (coarse)",  linestyle="None"),
-        Line2D([0], [0], marker="s", color="#fff176", ms=6, label="Det (fine)",    linestyle="None"),
-        Line2D([0], [0], marker="s", color="#ff8a65", ms=6, label="Det (confirm)", linestyle="None"),
-        Line2D([0], [0], marker="s", color="#a5d6a7", ms=6, label="Det (track)",   linestyle="None"),
-        Line2D([0], [0], marker="o", color="white",   ms=6, label="FINE",          linestyle="None"),
-        Line2D([0], [0], marker="^", color="white",   ms=6, label="CONFIRM",       linestyle="None"),
-        Line2D([0], [0], marker="D", color="white",   ms=6, label="TRACKED",       linestyle="None"),
+        Line2D([0], [0], marker="P", color="white",   ms=7,  label="True target",   linestyle="None"),
+        Line2D([0], [0], marker="s", color="#4fc3f7", ms=5,  label="Det (coarse)",  linestyle="None"),
+        Line2D([0], [0], marker="s", color="#fff176", ms=5,  label="Det (fine)",    linestyle="None"),
+        Line2D([0], [0], marker="s", color="#ff8a65", ms=5,  label="Det (confirm)", linestyle="None"),
+        Line2D([0], [0], marker="s", color="#a5d6a7", ms=5,  label="Det (track)",   linestyle="None"),
+        Line2D([0], [0], marker="o", color="white",   ms=5,  label="FINE",          linestyle="None"),
+        Line2D([0], [0], marker="^", color="white",   ms=5,  label="CONFIRM",       linestyle="None"),
+        Line2D([0], [0], marker="D", color="white",   ms=5,  label="TRACKED",       linestyle="None"),
     ]
-    ax.legend(handles=legend_items, loc="lower right",
-              facecolor="#0a0a1a", edgecolor="#4a7fa5",
-              labelcolor="white", fontsize=7)
+    ax_ppi.legend(handles=legend_items, loc="lower right",
+                  facecolor="#0d1117", edgecolor="#1e3a5f",
+                  labelcolor="white", fontsize=6)
 
-    # per-frame artist buckets
-    det_scatters = []
-    true_tgt_sc  = [None]
-    sector_patch = [None]
+    # per-frame PPI buckets
+    ppi_det_sc   = []
+    ppi_tgt_sc   = [None]
+    ppi_sector   = [None]
 
-    # ── animation ─────────────────────────────────────────────────────
+    # ── animation update ──────────────────────────────────────────────
 
     def update(_frame):
-        nonlocal det_scatters
+        nonlocal ppi_det_sc, _cfar_tgt_lines
 
         beam = mgr.next_beam()
         sm   = submodes.submodes[beam.submode_name]
@@ -191,45 +307,99 @@ def main():
         _move_targets(targets, dt_s=sm.time / 1000.0)
 
         sig  = sim.generate(targets, op, noise_sigma=0.0)
-        # sig  = _add_noise(sig, snr_db=20)
-        cfar_param: CFARParams = CFARParams(**sm.cfar)
-        dets = psp_process(sig, radar, submodes, op, cfar_param)
+        # sig  = _add_noise(sig, snr_db=1)
+        cfar = CFARParams(**sm.cfar)
+        dets = psp_process(sig, radar, submodes, op, cfar)
 
         result: StepResult = mgr.process(dets, beam, beam_time_ms=sm.time)
 
         print(
-            f"t={result.sim_time_ms/1000:.2f}s  {beam.submode_name:12s} "
-            f"az={beam.az:6.1f}°  dets={len(dets):3d}"
+            f"t={result.sim_time_ms/1000:.2f}s dets={len(dets)}"
         )
 
-        # ── clear previous frame artists ──────────────────────────────
-        for sc in det_scatters:
+        # ── signal processing for display ─────────────────────────────
+        rd_db, dpc_pow, noise_floor, det_mask, range_axis, vel_axis = \
+            _compute_rd_and_cfar(sig, sm, cfar, radar.fc)
+
+        # ── Range-Doppler update ───────────────────────────────────────
+        # transpose so range is on Y axis, Doppler on X
+        img_rd.set_data(rd_db.T)
+        img_rd.set_extent([0, sm.num_range_gates - 1,
+                           vel_axis[0], vel_axis[-1]])
+        lo, hi = np.percentile(rd_db, [2, 99])
+        img_rd.set_clim(lo, hi)
+        ax_rd.set_ylabel("Doppler (m/s)" if vel_axis[-1] > 10 else "Doppler bin")
+        ax_rd.set_xlabel("Range gate")
+        ax_rd.set_title(f"Range-Doppler  [{beam.submode_name}]  (dB)")
+
+        # ── CFAR update ───────────────────────────────────────────────
+        rng_km = range_axis / 1000.0
+
+        line_pow.set_data(rng_km, dpc_pow)
+        line_thr.set_data(rng_km, noise_floor)
+
+        # detections scatter
+        det_x = rng_km[det_mask]
+        det_y = dpc_pow[det_mask]
+
+        # Update offsets directly instead of rebuilding
+        offsets = np.column_stack((det_x, det_y)) if det_x.size > 0 else np.empty((0, 2))
+        line_dets.set_offsets(offsets)
+
+        # redraw target range markers (vertical dashed lines)
+        for ln in _cfar_tgt_lines:
+            ln.remove()
+        _cfar_tgt_lines.clear()
+
+        for t in targets:
+            r, az, el = t.polar_position
+            # only show targets in this beam's az/el window
+            if (abs(az - beam.az) <= sm.azimuth_width / 2.0 and
+                    abs(el - beam.el) <= sm.elevation_width / 2.0 and
+                    r / 1000.0 <= rng_km[-1]):
+                ln = ax_cfar.axvline(
+                    r / 1000.0, color="lime", lw=0.8,
+                    ls=":", alpha=0.7,
+                )
+                _cfar_tgt_lines.append(ln)
+
+        ax_cfar.relim()
+        ax_cfar.autoscale_view(scalex=False, scaley=True)
+        ax_cfar.set_xlim(rng_km[0], rng_km[-1])
+        ax_cfar.set_title(
+            f"CFAR  [{beam.submode_name}]  "
+            f"guard={cfar.guard_cells}  train={cfar.training_cells}  "
+            f"thr={cfar.threshold}"
+        )
+
+        # ── PPI — clear ───────────────────────────────────────────────
+        for sc in ppi_det_sc:
             sc.remove()
-        det_scatters.clear()
+        ppi_det_sc.clear()
 
-        if true_tgt_sc[0] is not None:
-            true_tgt_sc[0].remove()
-            true_tgt_sc[0] = None
+        if ppi_tgt_sc[0] is not None:
+            ppi_tgt_sc[0].remove()
+            ppi_tgt_sc[0] = None
 
-        if sector_patch[0] is not None:
-            sector_patch[0].remove()
-            sector_patch[0] = None
+        if ppi_sector[0] is not None:
+            ppi_sector[0].remove()
+            ppi_sector[0] = None
 
-        for artist in getattr(ax, "_track_artists", []):
+        for artist in getattr(ax_ppi, "_track_artists", []):
             artist.remove()
-        ax._track_artists = []
+        ax_ppi._track_artists = []
 
-        # ── beam sector ───────────────────────────────────────────────
+        # ── PPI — beam sector ─────────────────────────────────────────
         half_az = sm.azimuth_width / 2.0
-        sector_patch[0] = mpatches.Wedge(
+        ppi_sector[0] = mpatches.Wedge(
             (0, 0), max_r,
             beam.az - half_az, beam.az + half_az,
             color=BEAM_COLOR.get(beam.purpose, "white"),
             alpha=0.10, zorder=1,
         )
-        ax.add_patch(sector_patch[0])
+        ax_ppi.add_patch(ppi_sector[0])
 
-        # ── true targets (white '+') ───────────────────────────────────
+        # ── PPI — true targets ────────────────────────────────────────
         txs, tys = [], []
         for t in targets:
             tx, ty = _xyz_to_ppi(t.position_xyz)
@@ -237,69 +407,66 @@ def main():
                 txs.append(tx)
                 tys.append(ty)
         if txs:
-            true_tgt_sc[0] = ax.scatter(
-                txs, tys, marker="P", s=35,
-                c="white", alpha=0.40, linewidths=0.3,
-                zorder=4,
+            ppi_tgt_sc[0] = ax_ppi.scatter(
+                txs, tys, marker="P", s=30,
+                c="white", alpha=0.35, linewidths=0.3, zorder=4,
             )
 
-        # ── detections ────────────────────────────────────────────────
+        # ── PPI — detections ──────────────────────────────────────────
         for det in result.detections:
             dx, dy = _polar_to_ppi(det.range, det.azimuth, det.elevation)
-            sc = ax.scatter(
-                dx, dy, s=22, alpha=0.85, zorder=5,
+            sc = ax_ppi.scatter(
+                dx, dy, s=20, alpha=0.85, zorder=5,
                 c=BEAM_COLOR.get(beam.purpose, "white"),
             )
-            det_scatters.append(sc)
+            ppi_det_sc.append(sc)
 
-        # ── tracks ────────────────────────────────────────────────────
+        # ── PPI — tracks ──────────────────────────────────────────────
         for tr in result.tracks.values():
             if tr.state == TrackState.DROPPED:
                 continue
-
             color  = _track_color(tr.id)
             marker = STATE_MARKER[tr.state]
 
             if len(tr.hit_history) >= 2:
                 hist = np.array(tr.hit_history)
-                ln, = ax.plot(
+                ln, = ax_ppi.plot(
                     hist[:, 0], hist[:, 1],
-                    "-", color=color, lw=1.2, alpha=0.75, zorder=6,
+                    "-", color=color, lw=1.1, alpha=0.75, zorder=6,
                 )
-                ax._track_artists.append(ln)
+                ax_ppi._track_artists.append(ln)
 
             px, py = _xyz_to_ppi(tr.kalman.position_xyz)
-            sc = ax.scatter(
-                px, py, c=[color], s=50, marker=marker,
-                zorder=7, edgecolors="white", linewidths=0.5,
+            sc = ax_ppi.scatter(
+                px, py, c=[color], s=45, marker=marker,
+                zorder=7, edgecolors="white", linewidths=0.4,
             )
-            ax._track_artists.append(sc)
+            ax_ppi._track_artists.append(sc)
 
-            lbl = ax.text(
+            lbl = ax_ppi.text(
                 px + max_r * 0.012, py + max_r * 0.012,
                 tr.id[:6], color=color, fontsize=6, zorder=8,
             )
-            ax._track_artists.append(lbl)
+            ax_ppi._track_artists.append(lbl)
 
-        # ── status ────────────────────────────────────────────────────
+        # ── status text ───────────────────────────────────────────────
         q         = mgr.queue_summary()
         n_tracked = sum(1 for t in result.tracks.values() if t.state == TrackState.TRACKED)
         n_fine    = sum(1 for t in result.tracks.values() if t.state == TrackState.FINE)
         n_confirm = sum(1 for t in result.tracks.values() if t.state == TrackState.CONFIRM)
 
-        status_text.set_text(
-            f"t={result.sim_time_ms/1000:.2f}s  "
+        ppi_status.set_text(
+            # f"t={result.sim_time_ms/1000:.2f}s  "
             f"beam={beam.submode_name}  az={beam.az:.1f}°  el={beam.el:.1f}°\n"
-            f"dets={len(result.detections)}  "
-            f"tracked={n_tracked}  fine={n_fine}  confirm={n_confirm}\n"
-            f"queue  coarse={q['coarse']}  fine={q['fine']}  "
-            f"confirm={q['confirm']}  track={q['track']}"
+            # f"dets={len(result.detections)}  "
+            # f"tracked={n_tracked}  fine={n_fine}  confirm={n_confirm}\n"
+            # f"queue  coarse={q['coarse']}  fine={q['fine']}  "
+            # f"confirm={q['confirm']}  track={q['track']}"
         )
 
         return []
 
-    anim = FuncAnimation(fig, update, interval=80, blit=False, cache_frame_data=False)  # noqa: F841
-    plt.tight_layout()
+    anim = FuncAnimation(fig, update, interval=250, blit=False, cache_frame_data=False)  # noqa: F841
     plt.show()
 
 
