@@ -169,19 +169,19 @@ def build_scan_steps(radar, submodes, fine_prob=0.1, track_prob=0.05, confirm_pr
     track_prob / confirm_prob: chance to add track/confirm after a coarse look
     """
     rng = np.random.default_rng(seed)
-    wide_sm = submodes.submodes["wide_search"]
+    wide_sm = submodes.submodes["coarse_search"]
 
     steps = []
 
     for _ in range(repeat):
         for (azc, elc) in build_coarse_grid(radar, wide_sm):
             # always add the coarse step
-            steps.append(("wide_search", azc, elc, "coarse"))
+            steps.append(("coarse_search", azc, elc, "coarse"))
 
             # sometimes add fine (point_search)
             if rng.random() < fine_prob:
                 for (azf, elf) in build_fine_grid(azc, elc, wide_sm):
-                    steps.append(("point_search", azf, elf, "fine"))
+                    steps.append(("fine_search", azf, elf, "fine"))
 
             # sprinkle track / confirm
             if rng.random() < track_prob:
@@ -209,7 +209,7 @@ def main():
     viz_mode = "targets"  # or "detections"
     det_history = deque(maxlen=20)
 
-    wide_sm = submodes.submodes["wide_search"]
+    wide_sm = submodes.submodes["coarse_search"]
 
     r_all = list(
         sm.num_range_gates * C / (2 * sm.fs)
