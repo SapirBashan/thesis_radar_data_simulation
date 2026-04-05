@@ -9,39 +9,39 @@ class CFARParams:
     training_cells: int
     threshold: float
 
+from scipy.ndimage import convolve1d
+
 def cfar_1d(
     x: np.ndarray,
     guard_cells: int,
     training_cells: int,
     threshold: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    nrg, n_beams = x.shape
     g = int(guard_cells)
     t = int(training_cells)
 
-    w = g + t
-    noise = np.zeros_like(x, dtype=x.dtype)
+    # Training kernel:
+    # [1 ... 1] for left training cells
+    # [0 ... 0] for guard cells + CUT + guard cells
+    # [1 ... 1] for right training cells
+    kernel = np.r_[np.ones(t), np.zeros(2 * g + 1), np.ones(t)].astype(np.float64)
+    n_train = kernel.sum()
 
-    for i in range(nrg):
-        l0 = max(0, i - w)
-        l1 = max(0, i - g)
-        r0 = min(nrg, i + g + 1)
-        r1 = min(nrg, i + w + 1)
+    # Convolve along range axis with 'same' size output
+    # This gives the sum of training cells around each CUT
+    noise_sum = convolve1d(x.astype(np.float64), kernel, axis=0, mode="constant", cval=0.0)
+    noise = noise_sum / n_train
 
-        n_train = (l1 - l0) + (r1 - r0)
-        if n_train == 0:
-            continue
+    mask = threshold * noise
+    det = x > mask
 
-        s = 0.0
-        if l1 > l0:
-            s += x[l0:l1, :].sum(axis=0)
-        if r1 > r0:
-            s += x[r0:r1, :].sum(axis=0)
+    # remove detection from the start and end of the mask
+    pad = g + t
+    if pad > 0:
+        det[:pad, ...] = False
+        det[-pad:, ...] = False
 
-        noise[i, :] = s / n_train
-
-    det = x > (threshold * noise)
-    return noise, det
+    return mask, det
 
 def cfar_2d(
     p: np.ndarray,

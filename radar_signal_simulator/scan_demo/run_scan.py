@@ -13,7 +13,7 @@ from config.target import Target
 
 from radar_signal.generator import RadarSimulator
 
-from psp import psp_process, CFARParams, filter_target_submode
+from psp import psp_process, CFARParams, filter_target_submode, dbf_bfcu_mode, dpc, cfar_1d
 
 C = 299792458.0
 
@@ -214,13 +214,13 @@ def main():
     )
 
     cfar_params = CFARParams(
-        guard_cells=2,
-        training_cells=4,
-        threshold=1.25
+        guard_cells=8,
+        training_cells=8,
+        threshold=1.3
     )
 
 
-    targets = generate_targets(radar, n=100, r_min=2000.0, r_max=min_r_all)
+    targets = generate_targets(radar, n=10, r_min=2000.0, r_max=min_r_all)
 
     # Figure layout
     fig = plt.figure(figsize=(12, 8))
@@ -238,7 +238,14 @@ def main():
                             origin="lower", aspect="auto", cmap="viridis")
     img_rd = ax_rd.imshow(np.zeros((wide_sm.num_pulses, wide_sm.num_range_gates)),
                           origin="lower", aspect="auto", cmap="viridis")
-    img_avg = ax_avg.plot(np.zeros(wide_sm.num_range_gates))[0]
+    # img_avg = ax_avg.plot(np.zeros(wide_sm.num_range_gates))[0]
+    line_dpc, = ax_avg.plot([], [], "b-", label="DPC power")
+    line_thr, = ax_avg.plot([], [], "r--", label="CFAR threshold")
+    det_scatter = ax_avg.scatter([], [], c="r", s=35, label="Detections")
+
+    ax_avg.set_title("DPC power with CFAR")
+    ax_avg.grid(True, alpha=0.3)
+    ax_avg.legend(loc="upper right")
 
     ax_raw.set_title("Raw power (DBF sum)")
     ax_rd.set_title("Range-Doppler map")
@@ -275,7 +282,7 @@ def main():
 
         print(f"Detections/Targets: {len(detections)}/{len(filtered_targets)}")
 
-        beam = sig.sum(axis=0)
+        beam = sig.sum(axis=0)  # local visualization only
 
         raw_db = db(beam)
         img_raw.set_data(raw_db.T)
@@ -290,10 +297,33 @@ def main():
         lo, hi = np.percentile(rd_db, [5, 99])
         img_rd.set_clim(lo, hi)
 
-        mf = apply_matched_filter(beam, sm.pulse_width, sm.fs)
-        avg = np.mean(np.abs(mf) ** 2, axis=1)
+        # PSP DPC
+        x_dbf = dbf_bfcu_mode(sig)  # (n_rg, n_pri)
+        x_dpc = dpc(x_dbf[:, :, None], fs=sm.fs, pulse_width=sm.pulse_width)[:, :, 0]
+        dpc_pow = np.mean(np.abs(x_dpc) ** 2, axis=1)
+
+        noise_rg, det_rg = cfar_1d(dpc_pow[:, None], cfar_params.guard_cells, cfar_params.training_cells,
+                                   cfar_params.threshold)
+        noise_rg = noise_rg[:, 0]
+        det_rg = det_rg[:, 0]
+        thr = noise_rg
+
         x = np.arange(sm.num_range_gates)
-        img_avg.set_data(x, avg)
+
+        line_dpc.set_data(x, dpc_pow)
+        line_thr.set_data(x, thr)
+
+        det_idx = np.where(det_rg)[0]
+        det_y = dpc_pow[det_idx]
+
+        # recreate scatter each frame
+        for coll in list(ax_avg.collections):
+            coll.remove()
+        det_scatter = ax_avg.scatter(det_idx, det_y, c="r", s=35)
+
+        ax_avg.relim()
+        ax_avg.autoscale_view(scalex=False, scaley=True)
+        ax_avg.set_xlim(0, sm.num_range_gates - 1)
 
         # let matplotlib autoscale y each frame
         ax_avg.relim()
@@ -343,9 +373,9 @@ def main():
 
         ax_3d.view_init(elev=15, azim=-60)
 
-        return [img_raw, img_rd, img_avg, subtitle]
+        return [img_raw, img_rd, line_dpc, line_thr, det_scatter, subtitle]
 
-    ani = FuncAnimation(fig, update, frames=len(steps), interval=250, blit=False)
+    ani = FuncAnimation(fig, update, frames=len(steps), interval=1000, blit=False)
     plt.show()
 
 
