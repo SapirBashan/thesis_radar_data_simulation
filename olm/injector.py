@@ -116,7 +116,7 @@ def run_injector(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate and inject random radar snapshots.")
-    parser.add_argument("--output-dir", default="output_signal", help="Directory for txt snapshot files.")
+    parser.add_argument("--output-dir", default="olm/output_signal", help="Directory for txt snapshot files.")
     parser.add_argument("--interval-sec", type=float, default=2.5, help="Write period in seconds.")
     parser.add_argument("--mode-hold", type=int, default=1, help="Writes per mode before switching.")
     parser.add_argument("--max-steps", type=int, default=0, help="0 means infinite loop.")
