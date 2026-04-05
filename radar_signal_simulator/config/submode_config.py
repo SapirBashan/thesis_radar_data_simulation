@@ -2,6 +2,12 @@ from dataclasses import dataclass
 import json
 
 @dataclass
+class CFARParams:
+    guard_cells: int
+    training_cells: int
+    threshold: float
+
+@dataclass
 class SubmodeTemplate:
     fs: float
     prf: float
@@ -11,6 +17,7 @@ class SubmodeTemplate:
     azimuth_width: float
     elevation_width: float
     time: float
+    cfar: CFARParams
 
     @property
     def pri(self) -> float:

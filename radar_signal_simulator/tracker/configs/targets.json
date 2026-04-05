@@ -1,0 +1,14 @@
+[
+  {
+    "id": "f0a7d2f6-1b5b-4f6b-9a6c-1d4f91c8a0f1",
+    "position_xyz": [12000.0, 1500.0, 200.0],
+    "velocity_xyz": [0.0, 0.0, 0.0],
+    "rcs": 5.0
+  },
+  {
+    "id": "3e1f2c8a-9c8f-4f5f-a3bd-7e0b01d6a2a9",
+    "position_xyz": [8000.0, -2000.0, 0.0],
+    "velocity_xyz": [0.0, 0.0, 0.0],
+    "rcs": 1.0
+  }
+]
