@@ -28,8 +28,8 @@ def filter_target_submode(
     filtered_targets = []
     for tgt in targets:
         r, az, el = tgt.polar_position
-        daz = _angle_diff_deg(az, op.look_az)
-        delv = _angle_diff_deg(el, op.look_el)
+        daz = _angle_diff_deg(az, op.az)
+        delv = _angle_diff_deg(el, op.el)
 
         if r > max_range_m:
             continue

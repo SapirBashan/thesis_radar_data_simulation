@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import json
+from typing import List, Tuple
 
 @dataclass
 class ArrayConfig:
@@ -15,8 +16,8 @@ class RadarConfig:
     tx_gain: float
     rx_gain: float
     array: ArrayConfig
-    azimuth_range: list[float]
-    elevation_range: list[float]
+    azimuth_range: Tuple[float, float]
+    elevation_range: Tuple[float, float]
 
     @property
     def wavelength(self) -> float:

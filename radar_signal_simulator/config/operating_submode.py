@@ -4,8 +4,8 @@ import json
 @dataclass
 class OperatingSubmode:
     submode_name: str
-    look_az: float
-    look_el: float
+    az: float
+    el: float
 
     @staticmethod
     def load(path: str) -> "OperatingSubmode":
@@ -16,9 +16,9 @@ class OperatingSubmode:
     @staticmethod
     def from_values(submode_name: str, look_az: float, look_el: float) -> "OperatingSubmode":
         # real-time construction (no JSON)
-        return OperatingSubmode(submode_name=submode_name, look_az=look_az, look_el=look_el)
+        return OperatingSubmode(submode_name=submode_name, az=look_az, el=look_el)
 
     def update_look(self, look_az: float, look_el: float) -> None:
         # real-time update
-        self.look_az = look_az
-        self.look_el = look_el
+        self.az = look_az
+        self.el = look_el
