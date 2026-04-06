@@ -44,17 +44,17 @@ def psp_process(
     raw: np.ndarray,
     radar: RadarConfig,
     submode_lib: SubmodeLibrary,
-    submode: OperatingSubmode,
+    beam,
     cfar_params: CFARParams
 ) -> list[Detection]:
-    sbm: SubmodeTemplate = submode_lib.submodes[submode.submode_name]
+    sbm: SubmodeTemplate = submode_lib.submodes[beam.submode_name]
     fs = sbm.fs
     prf = sbm.prf
     pulse_width = sbm.pulse_width
     fc = radar.fc
 
-    beam_az = submode.look_az
-    beam_el = submode.look_el
+    beam_az = beam.az
+    beam_el = beam.el
 
     x_dbf = dbf_bfcu_mode(raw)
     # make shape (1, nrg, npri)

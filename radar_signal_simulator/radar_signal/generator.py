@@ -39,37 +39,17 @@ class RadarSimulator:
         phase = 2 * np.pi / lam * (xv * kx + yv * ky)
         return np.exp(1j * phase).reshape(-1)  # (nelems,)
 
-    def _validate_operating_submode(self, sm: SubmodeTemplate, op: OperatingSubmode):
-        az_min, az_max = self.radar_cfg.azimuth_range
-        el_min, el_max = self.radar_cfg.elevation_range
-
-        half_az = sm.azimuth_width / 2.0
-        half_el = sm.elevation_width / 2.0
-
-        if not (az_min <= op.look_az <= az_max):
-            raise ValueError("look_az outside radar azimuth_range")
-
-        if not (el_min <= op.look_el <= el_max):
-            raise ValueError("look_el outside radar elevation_range")
-
-        if (op.look_az - half_az) < az_min or (op.look_az + half_az) > az_max:
-            raise ValueError("submode azimuth_width exceeds radar azimuth_range")
-
-        if (op.look_el - half_el) < el_min or (op.look_el + half_el) > el_max:
-            raise ValueError("submode elevation_width exceeds radar elevation_range")
-
     def generate(
         self,
         targets: list[Target],
-        operating_submode: OperatingSubmode,
+        beam,
         noise_sigma: float = 0.0
     ) -> np.ndarray:
         """
         Returns:
           signal: complex ndarray with shape (nelems, nrg, npri)
         """
-        sm = self.submodes.submodes[operating_submode.submode_name]
-        self._validate_operating_submode(sm, operating_submode)
+        sm = self.submodes.submodes[beam.submode_name]
 
         nrg = sm.num_range_gates
         npri = sm.num_pulses
@@ -88,8 +68,8 @@ class RadarSimulator:
 
         for tgt in targets:
             r, az, el = tgt.polar_position
-            daz = _angle_diff_deg(az, operating_submode.look_az)
-            delv = _angle_diff_deg(el, operating_submode.look_el)
+            daz = _angle_diff_deg(az, beam.az)
+            delv = _angle_diff_deg(el, beam.el)
 
             if abs(daz) > half_az or abs(delv) > half_el:
                 continue  # outside FOV

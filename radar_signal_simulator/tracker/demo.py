@@ -4,11 +4,6 @@ Radar debug display — 3 panels:
   Top-left  : Range-Doppler map (dB)
   Top-right : DPC power + CFAR threshold + detection markers
   Bottom    : PPI — true targets, detections, tracks
-
-Requires:
-- tracker.radar_manager.RadarManager
-- tracker.radar_manager.StepResult
-- tracker.track.TrackState
 """
 
 from __future__ import annotations
@@ -36,7 +31,7 @@ from psp.dbf import dbf_bfcu_mode
 from psp.dpc import dpc
 from psp.cfar import cfar_1d
 
-from tracker.radar_manager import RadarManager, StepResult
+from tracker.radar_manager import RadarManager
 from tracker.track import TrackState
 
 C0 = 299_792_458.0
@@ -47,15 +42,6 @@ EPS = 1e-12
 
 def _db(x):
     return 10.0 * np.log10(np.abs(x) ** 2 + EPS)
-
-
-def _add_noise(signal, snr_db=20.0):
-    p = max(np.mean(np.abs(signal) ** 2), EPS)
-    sigma = np.sqrt(p / (10 ** (snr_db / 10.0)))
-    noise = (sigma / np.sqrt(2)) * (
-        np.random.randn(*signal.shape) + 1j * np.random.randn(*signal.shape)
-    )
-    return signal + noise
 
 
 def _spherical_to_cart(range_m, az_rad, el_rad):
@@ -74,15 +60,6 @@ def _polar_to_ppi(range_m, az_deg, el_deg=0.0):
 
 def _xyz_to_ppi(xyz):
     return float(xyz[0]), float(xyz[1])
-
-
-def _detections_to_ppi(dets):
-    xs, ys = [], []
-    for d in dets:
-        x, y = _polar_to_ppi(d.range, d.azimuth, d.elevation)
-        xs.append(x)
-        ys.append(y)
-    return np.array(xs), np.array(ys)
 
 
 def _generate_targets(radar, n=40, r_min=3000.0, r_max=12000.0):
@@ -143,23 +120,11 @@ BEAM_COLOR = {
 # ── signal processing helpers ─────────────────────────────────────────
 
 def _compute_rd_and_cfar(sig, sm, cfar_params, fc):
-    """
-    Returns
-    -------
-    rd_db       : (n_rg, n_pri) range-Doppler power in dB
-    dpc_pow     : (n_rg,)       DPC power (summed over PRI)
-    noise_floor : (n_rg,)       CFAR noise estimate
-    det_mask    : (n_rg,) bool  CFAR detections
-    range_axis  : (n_rg,) m     range per gate
-    vel_axis    : (n_pri,) m/s  Doppler velocity axis
-    """
-    x_dbf = dbf_bfcu_mode(sig)   # (n_rg, n_pri)
+    x_dbf = dbf_bfcu_mode(sig)
     n_rg, n_pri = x_dbf.shape
 
-    x_dbf_3d = x_dbf[np.newaxis, :]  # (1, n_rg, n_pri)
-
-    x_dpc = dpc(x_dbf_3d, fs=sm.fs, pulse_width=sm.pulse_width)
-    x_dpc = x_dpc.reshape(n_rg, n_pri)
+    x_dbf_3d = x_dbf[np.newaxis, :]
+    x_dpc = dpc(x_dbf_3d, fs=sm.fs, pulse_width=sm.pulse_width).reshape(n_rg, n_pri)
 
     rd = np.fft.fftshift(np.fft.fft(x_dpc, axis=1), axes=1)
     rd_db = _db(rd)
@@ -193,7 +158,7 @@ def main():
     submodes = SubmodeLibrary.load("configs/submodes.json")
     sim = RadarSimulator(radar, submodes)
 
-    mgr = RadarManager(radar, submodes, max_misses=15, gate_m=500.0)
+    mgr = RadarManager(radar, submodes)
 
     targets = _generate_targets(radar, n=10, r_min=500.0, r_max=5000.0)
 
@@ -299,22 +264,32 @@ def main():
     def update(_frame):
         nonlocal ppi_det_sc, _cfar_tgt_lines
 
-        beam = mgr.next_beam()
+        beam = mgr.pop_next_beam()
         if beam is None:
+            print("no beam found")
             return []
 
         sm = submodes.submodes[beam.submode_name]
-        op = beam.op_submode
 
         _move_targets(targets, dt_s=sm.time / 1000.0)
 
-        sig = sim.generate(targets, op, noise_sigma=0.0)
+        sig = sim.generate(targets, beam)
         cfar = CFARParams(**sm.cfar)
-        dets = psp_process(sig, radar, submodes, op, cfar)
 
-        result: StepResult = mgr.process(dets, beam, beam_time_ms=sm.time)
+        dets = psp_process(sig, radar, submodes, beam, cfar)
 
-        print(f"t={result.sim_time_ms/1000:.2f}s dets={len(dets)}")
+        # update manager if it has the method, otherwise skip
+        if hasattr(mgr, "process"):
+            result = mgr.process(dets, beam, beam_time_ms=sm.time)
+            track_map = result.tracks
+            sim_time_ms = result.sim_time_ms
+        else:
+            if hasattr(mgr, "step_time"):
+                mgr.step_time(sm.time)
+            track_map = getattr(mgr, "tracks", {})
+            sim_time_ms = getattr(mgr, "sim_time_ms", 0.0)
+
+        print(f"t={sim_time_ms/1000:.2f}s dets={len(dets)}")
 
         rd_db, dpc_pow, noise_floor, det_mask, range_axis, vel_axis = _compute_rd_and_cfar(
             sig, sm, cfar, radar.fc
@@ -381,7 +356,7 @@ def main():
         ppi_sector[0] = mpatches.Wedge(
             (0, 0), max_r,
             beam.az - half_az, beam.az + half_az,
-            color=BEAM_COLOR.get(getattr(beam.purpose, "name", str(beam.purpose)).lower(), "white"),
+            color=BEAM_COLOR.get(beam.grid_level or beam.submode_name, "white"),
             alpha=0.10, zorder=1,
         )
         ax_ppi.add_patch(ppi_sector[0])
@@ -400,16 +375,16 @@ def main():
             )
 
         # ── PPI detections ──────────────────────────────────────────
-        for det in result.detections:
+        for det in dets:
             dx, dy = _polar_to_ppi(det.range, det.azimuth, det.elevation)
             sc = ax_ppi.scatter(
                 dx, dy, s=20, alpha=0.85, zorder=5,
-                c=BEAM_COLOR.get(getattr(beam.purpose, "name", str(beam.purpose)).lower(), "white"),
+                c=BEAM_COLOR.get(beam.grid_level or beam.submode_name, "white"),
             )
             ppi_det_sc.append(sc)
 
         # ── PPI tracks ──────────────────────────────────────────────
-        for tr in result.tracks.values():
+        for tr in track_map.values():
             if tr.state == TrackState.DROPPED:
                 continue
 
@@ -436,14 +411,14 @@ def main():
 
         # ── status text ─────────────────────────────────────────────
         q = mgr.queue_summary()
-        n_tracked = sum(1 for t in result.tracks.values() if t.state == TrackState.TRACKED)
-        n_candidate = sum(1 for t in result.tracks.values() if t.state == TrackState.CANDIDATE)
-        n_confirming = sum(1 for t in result.tracks.values() if t.state == TrackState.CONFIRMING)
-        n_lost = sum(1 for t in result.tracks.values() if t.state == TrackState.LOST)
+        n_tracked = sum(1 for t in track_map.values() if t.state == TrackState.TRACKED)
+        n_candidate = sum(1 for t in track_map.values() if t.state == TrackState.CANDIDATE)
+        n_confirming = sum(1 for t in track_map.values() if t.state == TrackState.CONFIRMING)
+        n_lost = sum(1 for t in track_map.values() if t.state == TrackState.LOST)
 
         ppi_status.set_text(
             f"beam={beam.submode_name} az={beam.az:.1f}° el={beam.el:.1f}°\n"
-            f"tracks={len(result.tracks)} tracked={n_tracked} cand={n_candidate} "
+            f"tracks={len(track_map)} tracked={n_tracked} cand={n_candidate} "
             f"conf={n_confirming} lost={n_lost}\n"
             f"queue coarse={q['coarse']} fine={q['fine']} confirm={q['confirm']} "
             f"track={q['track']} recovery={q['recovery']}"
@@ -451,9 +426,7 @@ def main():
 
         return []
 
-    anim = FuncAnimation(
-        fig, update, interval=250, blit=False, cache_frame_data=False
-    )
+    ani = FuncAnimation(fig, update, interval=250, blit=False, cache_frame_data=False)
     plt.show()
 
 
