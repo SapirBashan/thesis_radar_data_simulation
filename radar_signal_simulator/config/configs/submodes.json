@@ -6,15 +6,12 @@
     "num_pulses": 128,
     "num_range_gates": 2048,
     "azimuth_width": 20.0,
-    "elevation_width": 6.0
-  },
-  "track_narrow": {
-    "fs": 40e6,
-    "prf": 4000.0,
-    "pulse_width": 1e-6,
-    "num_pulses": 256,
-    "num_range_gates": 4096,
-    "azimuth_width": 4.0,
-    "elevation_width": 2.0
+    "elevation_width": 6.0,
+    "time": 18,
+    "cfar": {
+      "num_training_cells": 16,
+      "num_guard_cells": 4,
+      "threshold": 1e-6
+    }
   }
 }

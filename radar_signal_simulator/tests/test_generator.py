@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -8,10 +10,13 @@ from config.target import Target
 from radar_signal.generator import RadarSimulator
 
 def main():
-    radar = RadarConfig.load("config/configs/radar_config.json")
-    submodes = SubmodeLibrary.load("config/configs/submodes.json")
-    op = OperatingSubmode.load("config/configs/operating_submode.json")
-    targets = Target.load_list("config/configs/targets.json")
+    # print cwd
+    cwd = os.getcwd()
+    print(cwd)
+    radar = RadarConfig.load("../config/configs/radar_config.json")
+    submodes = SubmodeLibrary.load("../config/configs/submodes.json")
+    op = OperatingSubmode.load("../config/configs/operating_submode.json")
+    targets = Target.load_list("../config/configs/targets.json")
 
     sim = RadarSimulator(radar, submodes)
     signal = sim.generate(targets, op, noise_sigma=0.0)

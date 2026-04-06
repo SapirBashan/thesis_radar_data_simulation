@@ -1,5 +1,5 @@
 {
   "submode_name": "search_wide",
-  "look_az": 0.0,
-  "look_el": 0.0
+  "az": 0.0,
+  "el": 0.0
 }
