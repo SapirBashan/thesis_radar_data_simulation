@@ -1,10 +1,14 @@
 import numpy as np
 
-def dpc(signal: np.ndarray, fs: float, pulse_width: float) -> np.ndarray:
-    n_rg = signal.shape[0]
-    h = np.ones(int(fs * pulse_width), dtype=signal.dtype)
+def dpc_processing(signal: np.ndarray, pulse_width) -> np.ndarray:
+    matched_filter = np.ones(pulse_width, dtype=signal.dtype)
+    matched_filter = np.conj(matched_filter)
 
-    X = np.fft.fft(signal, axis=0)
-    H = np.fft.fft(h, n=n_rg).reshape(n_rg, 1, 1)
+    compressed_signal = []
 
-    return np.fft.ifft(X * H, axis=0)
+    for i in range(signal.shape[1]):
+        compressed_signal.append(np.convolve(signal[:, i], matched_filter, mode='same'))
+
+    compressed_signal = np.array(compressed_signal)
+
+    return compressed_signal.T

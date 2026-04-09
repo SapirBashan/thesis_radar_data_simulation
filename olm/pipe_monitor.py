@@ -4,6 +4,8 @@ import struct
 import numpy as np
 import matplotlib.pyplot as plt
 
+from .signal_processing import dpc, cfar_1d, range_doppler_power
+
 
 class PipeMonitor:
     def __init__(self, monitor, pipe_path: str = "/tmp/radar_pipe"):
@@ -63,12 +65,13 @@ class PipeMonitor:
                     # Dynamically calculate payload size for this specific frame
                     # 8 bytes for your custom float-based complex_t (4 bytes real + 4 bytes imag)
                     self.sz_raw = self.current_npri * self.current_nrg * 8
-                    self.sz_dpc = self.current_nrg * 4  # 4 bytes for float
-                    self.sz_fft = self.current_npri * self.current_nrg * 8
-                    self.sz_cfar = self.current_nrg * 4  # 4 bytes for int
+                    # self.sz_dpc = self.current_nrg * 4  # 4 bytes for float
+                    # self.sz_fft = self.current_npri * self.current_nrg * 8
+                    # self.sz_cfar = self.current_nrg * 4  # 4 bytes for int
                     self.sz_stats = 24  # 3 doubles (8 bytes each)
 
-                    self.expected_payload_size = self.sz_raw + self.sz_dpc + self.sz_fft + self.sz_cfar + self.sz_stats
+                    # self.expected_payload_size = self.sz_raw + self.sz_dpc + self.sz_fft + self.sz_cfar + self.sz_stats
+                    self.expected_payload_size = self.sz_raw + self.sz_stats
                     self.reading_payload = True
                 else:
                     break  # Wait for more bytes to complete the header
@@ -95,17 +98,24 @@ class PipeMonitor:
         raw_signal = np.frombuffer(raw_sig_bytes, dtype=np.complex64).reshape(npri, nrg)
         offset += self.sz_raw
 
-        dpc_bytes = raw_bytes[offset: offset + self.sz_dpc]
-        dpc_avg = np.frombuffer(dpc_bytes, dtype=np.float64)
-        offset += self.sz_dpc
+        # dpc_bytes = raw_bytes[offset: offset + self.sz_dpc]
+        # dpc_avg = np.frombuffer(dpc_bytes, dtype=np.float64)
+        # offset += self.sz_dpc
+        #
+        # fft_bytes = raw_bytes[offset: offset + self.sz_fft]
+        # fft_signal = np.frombuffer(fft_bytes, dtype=np.complex64).reshape(npri, nrg)
+        # offset += self.sz_fft
+        #
+        # cfar_bytes = raw_bytes[offset: offset + self.sz_cfar]
+        # cfar_mask = np.frombuffer(cfar_bytes, dtype=np.float32)
+        # offset += self.sz_cfar
 
-        fft_bytes = raw_bytes[offset: offset + self.sz_fft]
-        fft_signal = np.frombuffer(fft_bytes, dtype=np.complex64).reshape(npri, nrg)
-        offset += self.sz_fft
+        dpc_power = dpc(raw_signal, fs=1e6, pulse_width=1e-6)
+        dpc_avg = np.mean(np.abs(dpc_power) ** 2, axis=1)
 
-        cfar_bytes = raw_bytes[offset: offset + self.sz_cfar]
-        cfar_mask = np.frombuffer(cfar_bytes, dtype=np.float32)
-        offset += self.sz_cfar
+        fft_signal = range_doppler_power(raw_signal)
+
+        cfar_mask, _ = cfar_1d(dpc_avg, 4, 10, 2.0)
 
         stat_bytes = raw_bytes[offset: offset + self.sz_stats]
         throughput, elapsed, running_avg = struct.unpack("<ddd", stat_bytes)
