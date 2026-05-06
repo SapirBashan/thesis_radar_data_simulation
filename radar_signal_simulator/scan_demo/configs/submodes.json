@@ -1,8 +1,8 @@
 {
   "coarse_search": {
-    "fs": 20e6,
+    "fs": 10e6,
     "prf": 2000.0,
-    "pulse_width": 2e-6,
+    "pulse_width": 1e-6,
     "num_pulses": 256,
     "num_range_gates": 1024,
     "azimuth_width": 16.0,

@@ -10,5 +10,5 @@
     "dy": 0.0156
   },
   "azimuth_range": [-30.0, 30.0],
-  "elevation_range": [20.0, 35.0]
+  "elevation_range": [15.0, 30.0]
 }

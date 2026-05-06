@@ -1,3 +1,4 @@
+import time
 from typing import List
 
 from collections import deque
@@ -223,9 +224,9 @@ def main():
         submodes,
         fine_prob=0.1,
         track_prob=0.1,
-        confirm_prob=0.1,
-        repeat=10,
-        # seed=1
+        confirm_prob=0.10,
+        repeat=1,
+        seed=42
     )
 
     cfar_params = CFARParams(
@@ -235,10 +236,10 @@ def main():
     )
 
 
-    targets = generate_targets(radar, n=50, r_min=2000.0, r_max=min_r_all)
+    targets = generate_targets(radar, n=10, r_min=2000.0, r_max=min_r_all)
 
     # Figure layout
-    fig = plt.figure(figsize=(12, 8))
+    fig = plt.figure(figsize=(12, 6))
     fig.suptitle("Radar Scan Demo", fontsize=14)
     subtitle = fig.text(0.5, 0.94, "", ha="center", va="top", fontsize=10)
 
@@ -324,7 +325,7 @@ def main():
 
         # PSP DPC
         x_dbf = dbf_bfcu_mode(sig)  # (n_rg, n_pri)
-        x_dpc = dpc(x_dbf[:, :, None], fs=sm.fs, pulse_width=sm.pulse_width)[:, :, 0]
+        x_dpc = dpc(x_dbf[:, :], pulse_width=int(sm.fs * sm.pulse_width))[:, :]
         dpc_pow = np.mean(np.abs(x_dpc) ** 2, axis=1)
 
         noise_rg, det_rg = cfar_1d(dpc_pow[:, None], cfar_params.guard_cells, cfar_params.training_cells,
@@ -402,7 +403,7 @@ def main():
 
         return [img_raw, img_rd, line_dpc, line_thr, det_scatter, subtitle]
 
-    ani = FuncAnimation(fig, update, frames=len(steps), interval=100, blit=False)
+    ani = FuncAnimation(fig, update, frames=len(steps), interval=300, blit=False)
     plt.show()
 
 

@@ -3,7 +3,7 @@ import numpy as np
 from config import RadarConfig, OperatingSubmode, SubmodeLibrary, SubmodeTemplate
 
 from .dbf import dbf_bfcu_mode
-from .dpc import dpc
+from .dpc import dpc_processing as dpc
 from .fft import range_doppler_power, doppler_velocity_from_bin
 from .cfar import cfar_1d, CFARParams
 from .detections import Detection
@@ -58,11 +58,17 @@ def psp_process(
 
     x_dbf = dbf_bfcu_mode(raw)
     # make shape (1, nrg, npri)
-    x_dbf = x_dbf[np.newaxis, :]
+    # x_dbf = x_dbf[np.newaxis, :]
 
-    x_dpc = dpc(x_dbf, fs=fs, pulse_width=pulse_width)
+    pulse_width_samples = int(fs * pulse_width)
+    print("pulse_width_samples", pulse_width_samples)
+
+    print(f"{x_dbf.shape=}")
+
+    x_dpc = dpc(x_dbf, pulse_width_samples)
+    # x_dpc = dpc(x_dbf, 10)
     # reshape from (1, nrg, npri) -> (nrg, npri)
-    x_dpc = x_dpc.reshape(x_dpc.shape[1], x_dpc.shape[2])
+    # x_dpc = x_dpc.reshape(x_dpc.shape[1], x_dpc.shape[2])
 
     x_pri_avg = np.sum(np.abs(x_dpc) ** 2, axis=1)
     # reshape from (nrg, ) -> (nrg, 1)

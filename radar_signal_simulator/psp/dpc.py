@@ -1,6 +1,6 @@
 import numpy as np
 
-def dpc_processing(signal: np.ndarray, pulse_width) -> np.ndarray:
+def dpc_processing(signal: np.ndarray, pulse_width: int) -> np.ndarray:
     matched_filter = np.ones(pulse_width, dtype=signal.dtype)
     matched_filter = np.conj(matched_filter)
 
