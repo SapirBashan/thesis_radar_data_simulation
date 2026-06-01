@@ -239,7 +239,7 @@ def main():
     targets = generate_targets(radar, n=10, r_min=2000.0, r_max=min_r_all)
 
     # Figure layout
-    fig = plt.figure(figsize=(12, 6))
+    fig = plt.figure(figsize=(10, 6))
     fig.suptitle("Radar Scan Demo", fontsize=14)
     subtitle = fig.text(0.5, 0.94, "", ha="center", va="top", fontsize=10)
 
@@ -403,7 +403,7 @@ def main():
 
         return [img_raw, img_rd, line_dpc, line_thr, det_scatter, subtitle]
 
-    ani = FuncAnimation(fig, update, frames=len(steps), interval=300, blit=False)
+    ani = FuncAnimation(fig, update, frames=len(steps), interval=1000, blit=False)
     plt.show()
 
 

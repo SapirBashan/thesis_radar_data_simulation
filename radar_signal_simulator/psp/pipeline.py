@@ -70,6 +70,8 @@ def psp_process(
     # reshape from (1, nrg, npri) -> (nrg, npri)
     # x_dpc = x_dpc.reshape(x_dpc.shape[1], x_dpc.shape[2])
 
+    # range-doppler
+
     x_pri_avg = np.sum(np.abs(x_dpc) ** 2, axis=1)
     # reshape from (nrg, ) -> (nrg, 1)
     x_pri_avg = x_pri_avg[: , np.newaxis]
