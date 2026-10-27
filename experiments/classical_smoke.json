@@ -1,0 +1,14 @@
+{
+  "seed": 20261027,
+  "trials": 6,
+  "calibration_frames": 12,
+  "null_test_frames": 12,
+  "snr_db": [-15, 0],
+  "rcs": [0.25, 4],
+  "target_pfa": [0.01, 0.05],
+  "formats": ["complex64", "adc16"],
+  "zstd_levels": [3],
+  "baq_bits": [2, 4, 8],
+  "baq_blocks": [64],
+  "timing_repeats": 2
+}

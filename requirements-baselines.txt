@@ -1,0 +1,3 @@
+-r radar_simulator_v2/requirements.txt
+zstandard==0.25.0
+pytest>=9.0,<10

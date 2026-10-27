@@ -23,7 +23,8 @@ original local setup notes. Paths in the audit/setup documents describe the
 original machine and may need adjusting after cloning.
 
 `radar_simulator_audit.md` audits the older main-branch checkout, not v2.
-Compression algorithms have not been implemented. This is a simplified
+Classical compression baselines are documented in [CLASSICAL_BASELINES.md](CLASSICAL_BASELINES.md).
+This is a simplified
 synthetic simulator, not a validated measured-data benchmark.
 
 ## Attribution
