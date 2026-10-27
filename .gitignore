@@ -1,34 +1,20 @@
 .venv/
 .idea/
-
-#pyproject.toml
-
-output_signal/
-
-.DS_Store
-
+.vscode/
 __pycache__/
-
-# Python tooling and local environments
 *.py[cod]
 .pytest_cache/
-.ruff_cache/
 .mypy_cache/
-*.egg-info/
+.ruff_cache/
+radar_audit_dependencies/
+radar_audit_results/
+output_signal/
+output/
+results/
 build/
 dist/
-.coverage
-htmlcov/
-
-# Local credentials and machine settings
+*.egg-info/
+*.log
 .env
 .env.*
 !.env.example
-.vscode/
-
-# Generated results; scenario JSON configurations remain tracked
-output/
-results/
-radar_audit_results/
-radar_audit_dependencies/
-*.log

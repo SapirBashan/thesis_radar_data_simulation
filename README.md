@@ -1,78 +1,36 @@
-# Radar Compression Thesis
+# Thesis radar data simulation
 
-Radar simulation workspace for an MSc thesis on radar data compression.
-Derived from [dattali18/radar_signal_processing_line](https://github.com/dattali18/radar_signal_processing_line), branch `dev/simulator_v2`.
-See [UPSTREAM.md](UPSTREAM.md) for attribution and license status.
-Compression algorithms and a compression benchmark are not implemented yet.
+MSc radar compression research workspace. The runnable simulator is in
+`radar_simulator_v2`; the earlier checkout is retained in
+`radar_signal_processing_line_audit` for comparison.
 
-## Quick start (Windows)
-
-Install Python 3.12 or newer, including Tcl/Tk for interactive plots.
+## Run the simulator
 
 ```powershell
-git clone https://github.com/SapirBashan/radar-compression-thesis.git
-cd radar-compression-thesis
+git clone https://github.com/SapirBashan/thesis_radar_data_simulation.git
+cd thesis_radar_data_simulation
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe run_demo.py scan
+.\.venv\Scripts\python.exe -m pip install -r radar_simulator_v2/requirements.txt
+.\.venv\Scripts\python.exe radar_simulator_v2/run_demo.py scan
 ```
 
-Linux/macOS: create the environment with `python3 -m venv .venv` and use
-`.venv/bin/python` in place of the Windows interpreter path. On some Linux
-distributions a separate OS Tk package is needed for interactive plots.
+Use `raw` instead of `scan` for static receiver plots. Open the cloned root
+folder in PyCharm, choose `.venv/Scripts/python.exe` as interpreter, and run
+`radar_simulator_v2/run_demo.py`. No manual import-path setup is needed.
 
-## Demos
+See `radar_simulator_v2/README.md` for details and `RUN_IN_PYCHARM.md` for the
+original local setup notes. Paths in the audit/setup documents describe the
+original machine and may need adjusting after cloning.
 
-```powershell
-.\.venv\Scripts\python.exe run_demo.py scan --seed 42
-.\.venv\Scripts\python.exe run_demo.py raw
-```
+`radar_simulator_audit.md` audits the older main-branch checkout, not v2.
+Compression algorithms have not been implemented. This is a simplified
+synthetic simulator, not a validated measured-data benchmark.
 
-`scan` opens an animated scan with signal power, range-Doppler display, a CFAR
-profile and a 3D target view. Close the window to stop. `raw` shows per-element
-signal-power plots. The launcher handles source imports and configuration paths;
-no manual PYTHONPATH or local .pth file is needed. NumPy uses the supplied seed;
-target UUID identifiers are generated independently.
+## Attribution
 
-## PyCharm
-
-Open this repository folder and select the Python environment containing the
-requirements. Run root-level `run_demo.py` for the scan, or set script parameters
-to `raw` for the static example. If animations appear static in the Plots panel,
-disable **Show plots in tool window** in Python Plots settings and use
-`MPLBACKEND=TkAgg` with a Tk-enabled interpreter for a separate window.
-
-## Structure
-
-- `radar_signal_simulator/radar_signal/`: complex-baseband echo generation.
-- `radar_signal_simulator/config/`: target, radar and submode configuration.
-- `radar_signal_simulator/psp/`: beam sum, filtering, Doppler, CFAR and detections.
-- `radar_signal_simulator/scan_demo/`: animated demo and scenario configurations.
-- `radar_signal_simulator/tracker/`: upstream scheduling and tracking modules.
-- `radar_signal_simulator/tests/test_generator.py`: static plotting example,
-  not an assertion-based unit-test suite.
-- `olm/` and `cpp_injector/`: upstream monitoring/C++ utilities, retained for
-  reference. Building C++ is not required for the Python demos.
-
-Raw simulator data uses `(receiver element, range sample, pulse)` axes with
-complex64 samples. The model includes rectangular delayed echoes, radial-velocity
-Doppler, array phase, radar-equation amplitudes and optional Gaussian noise.
-It remains a simplified synthetic model; running it does not establish scientific
-validity or equivalence to measured I/Q.
-
-## Setup scope
-
-`requirements.txt` pins the main runtime dependencies used here. The upstream
-`pyproject.toml` and `uv.lock` are retained; requirements do not reproduce every
-transitive lockfile version. Virtual environments, caches, IDE configuration,
-credentials and generated results are excluded from Git. Local audit folders
-and the older checkout are outside this repository and are not uploaded.
-
-The setup changes preserve all upstream radar algorithms. The earlier audit of
-the main branch does not cover this branch.
-
-## Upstream TODOs
-
-- Display detections rather than targets in the 3D view.
-- Show detection and target counts in the sector.
-- Extend radar-manager scheduling based on detections and tracks.
+Both simulator versions originate from
+[dattali18/radar_signal_processing_line](https://github.com/dattali18/radar_signal_processing_line).
+See `radar_simulator_v2/UPSTREAM.md` for provenance and upstream license status.
+The original commit histories are preserved as parents of the workspace import.
+Virtual environments, installed dependencies, IDE state and generated outputs
+are excluded from this repository.

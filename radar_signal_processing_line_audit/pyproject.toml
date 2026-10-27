@@ -1,0 +1,9 @@
+[project]
+name = "radar-signal-processing-line"
+version = "0.1.0"
+description = "Radar Processing Line Online Monitor"
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.10.8",
+    "numpy>=2.0.0",
+]

@@ -1,0 +1,9 @@
+.venv/
+.idea/
+
+#pyproject.toml
+
+output_signal/
+
+.DS_Store
+
