@@ -96,6 +96,61 @@ def test_known_target_detected_at_expected_range_and_doppler():
     assert min(abs(d.range-expected) for d in dets)<299792458/(2*radar.s.fs)*2
 
 
+def test_adjacent_range_centroid_numerically_reproduces_published_bug():
+    from psp.pipeline import _merge_adjacent_range_hits
+    mask=np.zeros(64,dtype=bool)
+    power=np.zeros(64)
+    mask[10:13]=True
+    power[10:13]=[10,20,70]
+    # Weighted mean=(10*10+11*20+12*70)/100 = 11.6, not sum(10,11,12)=33.
+    assert _merge_adjacent_range_hits(mask,power)==[(11.6,100.0)]
+    assert _merge_adjacent_range_hits(mask[:,None],power[:,None])==[(33.0,100.0)]
+
+
+def _adjacent_cell_pipeline(monkeypatch,threshold,power_scale=1.0):
+    import psp.pipeline as pipeline
+    from psp import CFARParams
+    radar=SceneGenerator(Settings(range_gates=64,pulses=8))
+    power=np.full(64,2.0)
+    power[10:13]=[10,20,70]
+    power*=power_scale
+    phase=np.exp(2j*np.pi*2*np.arange(8)/8)
+    iq=(np.sqrt(power[:,None]/8)*phase[None,:])[None,:,:]
+    # Isolate the detector from the matched filter with known integrated powers.
+    monkeypatch.setattr(pipeline,'dpc',lambda x,pulse_width:x)
+    return radar,pipeline.psp_process(iq,radar.radar,radar.library,radar.beam,CFARParams(3,2,threshold))
+
+
+def test_pipeline_passes_vectors_for_adjacent_range_cells(monkeypatch):
+    radar,detections=_adjacent_cell_pipeline(monkeypatch,3.0)
+    assert len(detections)==1
+    assert detections[0].range==pytest.approx(12*299792458/(2*radar.s.fs))
+    expected_velocity=radar.radar.wavelength*radar.s.prf/8
+    assert detections[0].velocity==pytest.approx(expected_velocity)
+
+
+def test_reported_power_ratio_uses_unscaled_noise_and_is_threshold_invariant(monkeypatch):
+    snrs=[]
+    for threshold in (2.0,3.0,4.0):
+        _,detections=_adjacent_cell_pipeline(monkeypatch,threshold)
+        assert len(detections)==1
+        snrs.append(detections[0].snr)
+    assert snrs==pytest.approx([10*np.log10(70/2)]*3)
+
+
+def test_reported_power_ratio_is_invariant_to_small_physical_power_scale(monkeypatch):
+    for scale in (1.0,1e-18):
+        _,detections=_adjacent_cell_pipeline(monkeypatch,3.0,power_scale=scale)
+        assert detections[0].snr==pytest.approx(10*np.log10(35))
+
+
+@pytest.mark.parametrize('threshold',[0,-1,float('nan'),float('inf')])
+def test_detector_rejects_invalid_threshold_for_noise_unscaling(threshold):
+    radar=SceneGenerator(Settings())
+    with pytest.raises(ValueError,match='threshold'):
+        radar.detect(np.zeros((1,256,32),dtype=np.complex64),threshold)
+
+
 def test_one_to_one_matching_does_not_count_duplicate_detections():
     from psp import Detection
     radar=SceneGenerator(Settings())
