@@ -80,14 +80,19 @@ def psp_process(
     training_cells = cfar_params.training_cells
     threshold = cfar_params.threshold
 
-    noise_rg, det_rg = cfar_1d(x_pri_avg, guard_cells, training_cells, threshold)
+    # CFAR threshold must be positive and finite.
+    if not np.isfinite(threshold) or threshold <= 0:
+        raise ValueError("CFAR threshold must be positive and finite")
 
+    noise_rg, det_rg = cfar_1d(
+        x_pri_avg, guard_cells, training_cells, threshold
+    )
     p_rd = range_doppler_power(x_dpc)
 
     n_rg, n_pri = x_dpc.shape
     detections = []
 
-    merged = _merge_adjacent_range_hits(det_rg, x_pri_avg)
+    merged = _merge_adjacent_range_hits(det_rg[:, 0], x_pri_avg[:, 0])
     for rg_w, p_sum in merged:
         rg_bin = int(round(rg_w))
         rg_bin = max(0, min(n_rg - 1, rg_bin))
@@ -99,11 +104,16 @@ def psp_process(
         # Velocity
         v_mps = doppler_velocity_from_bin(dop_bin, n_pri, prf, fc, fftshift=True)
 
-        # SNR estimate: simple ratio using CFAR noise estimate at the representative bin
-        noise = float(noise_rg[rg_bin, 0])
+        # CFAR returns threshold * estimated_noise.
+        # Recover the original noise estimate.
+        noise = float(noise_rg[rg_bin, 0]) / threshold
         sig = float(x_pri_avg[rg_bin, 0])
-        snr_lin = sig / (noise + 1e-12)
-        snr_db = 10.0 * np.log10(snr_lin + 1e-12)
+
+        if noise > 0:
+            snr_lin = sig / noise
+            snr_db = 10.0 * np.log10(snr_lin)
+        else:
+            snr_db = float("inf") if sig > 0 else float("nan")
 
         det = Detection(
             range_m,
